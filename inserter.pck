@@ -2,30 +2,32 @@ create or replace package inserter authid current_user is
 
 --Constants used for parameters.
 --(Created as functions because package variables cannot be referenced in SQL.)
-function ANSI_LITERAL  return number;
-function TO_DATE       return number;
-function ALTER_SESSION return number;
+function DATE_STYLE_ANSI_LITERAL  return number;
+function DATE_STYLE_TO_DATE       return number;
+function DATE_STYLE_ALTER_SESSION return number;
 
-function ALIGNED       return number;
-function UNALIGNED     return number;
+function ALIGNMENT_UNALIGNED      return number;
+function ALIGNMENT_ALIGNED        return number;
 
-function UPPER         return number;
-function LOWER         return number;
-function CAMEL         return number;
+function CASE_UPPER               return number;
+function CASE_LOWER               return number;
+function CASE_CAMEL               return number;
 
-function HEADER_ON     return number;
-function HEADER_OFF    return number;
+function HEADER_ON                return number;
+function HEADER_OFF               return number;
+function HEADER_CUSTOM            return number;
 
 --Main function
 function get_script
 (
-	p_table_name      varchar2,
-	p_select          clob,
-	p_date_style      number   default ansi_literal,
-	p_nls_date_format varchar2 default null,
-	p_alignment       number   default unaligned,
-	p_case_style      number   default lower,
-	p_header          varchar2 default header_on
+	p_table_name          varchar2,
+	p_select              clob,
+	p_date_style          number   default date_style_ansi_literal,
+	p_nls_date_format     varchar2 default null,
+	p_alignment           number   default alignment_unaligned,
+	p_case_style          number   default case_lower,
+	p_header              number   default header_on,
+	p_header_custom_value varchar2 default null
 ) return clob;
 
 end;
@@ -48,18 +50,20 @@ g_date                varchar2(100);
 g_to_date             varchar2(100);
 
 --Functions that act like constants.
-function ANSI_LITERAL  return number is begin return 1; end;
-function TO_DATE       return number is begin return 2; end;
-function ALTER_SESSION return number is begin return 3; end;
-function ALIGNED       return number is begin return 4; end;
-function UNALIGNED     return number is begin return 5; end;
-function UPPER         return number is begin return 6; end;
-function LOWER         return number is begin return 7; end;
-function CAMEL         return number is begin return 8; end;
+function DATE_STYLE_ANSI_LITERAL  return number is begin return 1; end;
+function DATE_STYLE_TO_DATE       return number is begin return 2; end;
+function DATE_STYLE_ALTER_SESSION return number is begin return 3; end;
 
-function HEADER_ON     return number is begin return 9; end;
-function HEADER_OFF    return number is begin return 10; end;
+function ALIGNMENT_UNALIGNED      return number is begin return 5; end;
+function ALIGNMENT_ALIGNED        return number is begin return 4; end;
 
+function CASE_LOWER               return number is begin return 7; end;
+function CASE_UPPER               return number is begin return 6; end;
+function CASE_CAMEL               return number is begin return 8; end;
+
+function HEADER_ON                return number is begin return 9; end;
+function HEADER_OFF               return number is begin return 10; end;
+function HEADER_CUSTOM            return number is begin return 11; end;
 
 
 --------------------------------------------------------------------------------------------------------------------------
@@ -67,19 +71,19 @@ procedure verify_parameters(p_date_style number, p_nls_date_format varchar2, p_a
 	v_throwaway varchar2(32767);
 begin
 	--Check that P_DATE_STYLE is correct.
-	if p_date_style in (inserter.ansi_literal, inserter.to_date, inserter.alter_session) then
+	if p_date_style in (inserter.date_style_ansi_literal, inserter.date_style_to_date, inserter.date_style_alter_session) then
 		null;
 	else
 		raise_application_error(-20000, 'p_date_style must be one of INSERTER.ANSI_LITERAL, INSERTER.TO_DATE, or INSERTER.ALTER_SESSION.');
 	end if;
 
 	--Check that P_DATE_STYLE and P_NLS_DATE_FORMAT are set correctly together.
-	if p_date_style = inserter.ansi_literal and p_nls_date_format is not null then
+	if p_date_style = inserter.date_style_ansi_literal and p_nls_date_format is not null then
 		raise_application_error(-20000, 'If P_DATE_STYLE is set to ANSI_LITERAL then P_NLS_DATE_FORMAT should be null.');
 	end if;
 
 	--Check that P_DATE_STYLE and P_NLS_DATE_FORMAT are set correctly together.
-	if p_date_style in (inserter.to_date, inserter.alter_session) and p_nls_date_format is null then
+	if p_date_style in (inserter.date_style_to_date, inserter.date_style_alter_session) and p_nls_date_format is null then
 		raise_application_error(-20000, 'If P_DATE_STYLE is set to TO_DATE or ALTER_SESSION, then P_NLS_DATE_FORMAT cannot be null.');
 	end if;
 
@@ -92,14 +96,14 @@ begin
 	end;
 
 	--Check P_ALIGNMENT.
-	if p_alignment in (aligned, unaligned) then
+	if p_alignment in (alignment_aligned, alignment_unaligned) then
 		null;
 	else
 		raise_application_error(-20000, 'P_ALIGNMENT must be set to either ALIGNED or UNALIGNED.');
 	end if;
 
 	--Check P_CASE_STYLE.
-	if p_case_style in (upper, lower, camel) then
+	if p_case_style in (case_upper, case_lower, case_camel) then
 		null;
 	else
 		raise_application_error(-20000, 'P_CASE_STYLE must be set to either UPPER, LOWER, or CAMEL.');
@@ -111,7 +115,7 @@ end verify_parameters;
 --------------------------------------------------------------------------------
 procedure set_keyword_case(p_case_style number) is
 begin
-	if p_case_style = upper then
+	if p_case_style = case_upper then
 		g_insert_into         := 'INSERT INTO';
 		g_select              := 'SELECT';
 		g_null                := 'NULL';
@@ -120,7 +124,7 @@ begin
 		g_timestamp           := 'TIMESTAMP';
 		g_date                := 'DATE';
 		g_to_date             := 'TO_DATE';
-	elsif p_case_style = lower then
+	elsif p_case_style = case_lower then
 		g_insert_into         := 'insert into';
 		g_select              := 'select';
 		g_null                := 'null';
@@ -129,7 +133,7 @@ begin
 		g_timestamp           := 'timestamp';
 		g_date                := 'date';
 		g_to_date             := 'to_date';
-	elsif p_case_style = camel then
+	elsif p_case_style = case_camel then
 		g_insert_into         := 'Insert Into';
 		g_select              := 'Select';
 		g_null                := 'Null';
@@ -149,14 +153,15 @@ procedure add_header
 	p_table_name varchar2,
 	p_rows number, p_date_style number,
 	p_nls_date_format varchar2,
-	p_header varchar2
+	p_header varchar2,
+	p_header_custom_value varchar2
 ) is
 	v_header clob;
 	v_new_output clob;
 begin
-	if p_header = to_char(header_off) then
+	if p_header = header_off then
 		null;
-	elsif p_header = to_char(header_on) then
+	elsif p_header = header_on then
 		--Add boilerplate header.
 		v_header := replace(replace(replace(replace(replace(
 			q'[
@@ -175,7 +180,7 @@ begin
 		,chr(10)||'				', chr(10));
 
 		--Alter the session, if requested.
-		if p_date_style = inserter.alter_session then
+		if p_date_style = inserter.date_style_alter_session then
 			v_header := v_header || 'alter session set nls_date_format = '''||p_nls_date_format||''';' || chr(10);
 		end if;
 
@@ -184,7 +189,7 @@ begin
 		dbms_lob.append(v_header, p_output);
 		p_output := v_header;
 	else
-		v_header := p_header;
+		v_header := p_header_custom_value;
 		dbms_lob.append(v_header, p_output);
 		p_output := v_header;
 	end if;
@@ -217,7 +222,7 @@ begin
 	if p_date is null then
 		return g_null;
 	else
-		if p_date_style = ansi_literal then
+		if p_date_style = DATE_STYLE_ANSI_LITERAL then
 			--Use DATE literal if there is no time, to save space.
 			if p_date = trunc(p_date) then
 				return g_date || ' ''' || to_char(p_date, 'YYYY-MM-DD') || '''';
@@ -225,9 +230,9 @@ begin
 			else
 				return g_timestamp || ' ''' || to_char(p_date, 'YYYY-MM-DD HH24:MI:SS') || '''';
 			end if;
-		elsif p_date_style = to_date then
+		elsif p_date_style = date_style_to_date then
 			return g_to_date || '(''' || to_char(p_date, p_nls_date_format) || ''', ''' || p_nls_date_format || ''')';
-		elsif p_date_style = alter_session then
+		elsif p_date_style = date_style_alter_session then
 			return '''' || to_char(p_date, p_nls_date_format) || '''';
 		end if;
 	end if;
@@ -296,13 +301,14 @@ end align_values;
 --------------------------------------------------------------------------------
 function get_script
 (
-	p_table_name      varchar2,
-	p_select          clob,
-	p_date_style      number   default ansi_literal,
-	p_nls_date_format varchar2 default null,
-	p_alignment       number   default unaligned,
-	p_case_style      number   default lower,
-	p_header          varchar2 default header_on
+	p_table_name          varchar2,
+	p_select              clob,
+	p_date_style          number   default date_style_ansi_literal,
+	p_nls_date_format     varchar2 default null,
+	p_alignment           number   default alignment_unaligned,
+	p_case_style          number   default case_lower,
+	p_header              number   default header_on,
+	p_header_custom_value varchar2 default null
 ) return clob is
 	v_cursor number;
 	v_column_count number;
@@ -442,7 +448,7 @@ begin
 	--TODO: What if no rows?
 
 	--Align values to make prettier output.
-	if p_alignment = aligned then
+	if p_alignment = alignment_aligned then
 		align_values(v_columns.count, v_rows);
 	end if;
 
@@ -473,12 +479,8 @@ begin
 	--dbms_lob.append(get_header(p_table_name, v_rows.count, p_date_style, p_nls_date_format, p_header), v_output);
 
 
-	add_header(v_output, p_table_name, v_rows.count, p_date_style, p_nls_date_format, p_header);
+	add_header(v_output, p_table_name, v_rows.count, p_date_style, p_nls_date_format, p_header, p_header_custom_value);
 	--add_footer(v_output);
-
-	--Finalize.
-	--v_output := get_header(p_table_name, v_rows.count, p_date_style, p_nls_date_format, p_header) || 
-	--	v_output || get_footer;
 
 	dbms_sql.close_cursor(v_cursor);
 	--dbms_output.put_line(v_output);
