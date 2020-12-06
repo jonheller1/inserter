@@ -27,7 +27,9 @@ function get_script
 	p_alignment           number   default alignment_unaligned,
 	p_case_style          number   default case_lower,
 	p_header              number   default header_on,
-	p_header_custom_value varchar2 default null
+	p_header_custom_value varchar2 default null,
+	p_sql_terminator      varchar2 default ';',
+	p_plsql_terminator    varchar2 default chr(10)||'/'
 ) return clob;
 
 end;
@@ -308,7 +310,9 @@ function get_script
 	p_alignment           number   default alignment_unaligned,
 	p_case_style          number   default case_lower,
 	p_header              number   default header_on,
-	p_header_custom_value varchar2 default null
+	p_header_custom_value varchar2 default null,
+	p_sql_terminator      varchar2 default ';',
+	p_plsql_terminator    varchar2 default chr(10)||'/'
 ) return clob is
 	v_cursor number;
 	v_column_count number;
@@ -466,7 +470,7 @@ begin
 		v_row := v_row || ' ' || g_from_dual || case when i <> v_rows.count then ' ' || g_union_all else null end;
 
 		if i = v_rows.count then
-			v_row := v_row || ';';
+			v_row := v_row || p_sql_terminator;
 		end if;
 
 		--v_output := v_output || v_row || chr(10);
