@@ -149,6 +149,31 @@ end set_keyword_case;
 
 
 --------------------------------------------------------------------------------
+procedure define_variables(p_column_count number, p_column_metadata dbms_sql.desc_tab4, p_cursor number) is
+	v_date date;
+	v_number number;
+	v_varchar2 varchar2(32767);
+	v_nvarchar2 nvarchar2(32767);
+begin
+	--Define variables.
+	for i in 1 .. p_column_count loop
+		if p_column_metadata(i).col_type = dbms_types.typecode_date then
+			dbms_sql.define_column(p_cursor, i, v_date);
+		elsif p_column_metadata(i).col_type = dbms_types.typecode_number then
+			dbms_sql.define_column(p_cursor, i, v_number);
+		elsif p_column_metadata(i).col_type in (dbms_types.typecode_char, dbms_types.typecode_varchar2, dbms_types.typecode_varchar) then
+			dbms_sql.define_column(p_cursor, i, v_varchar2, 32767);
+		elsif p_column_metadata(i).col_type in (dbms_types.typecode_nchar, dbms_types.typecode_nvarchar2) then
+			dbms_sql.define_column(p_cursor, i, v_nvarchar2, 32767);
+		--TODO: Add other types here.
+		end if;
+	end loop;
+end define_variables;
+
+
+
+
+--------------------------------------------------------------------------------
 procedure add_header
 (
 	p_output in out nocopy clob,
@@ -159,7 +184,6 @@ procedure add_header
 	p_header_custom_value varchar2
 ) is
 	v_header clob;
-	v_new_output clob;
 begin
 	if p_header = header_off then
 		null;
@@ -270,34 +294,146 @@ begin
 end get_string_from_nvarchar2;
 
 
-
 --------------------------------------------------------------------------------
-procedure align_values(p_column_count number, p_rows in out nocopy rows_nt) is
+procedure align_values(p_alignment number, p_column_count number, p_rows in out nocopy rows_nt) is
 	v_length number;
 	v_max_length number;
 begin
-	for i in 1 .. p_column_count loop
-		--Find the maximum size for each column.
-		v_max_length := 0;
-		for j in 1 .. p_rows.count loop
-			v_length := length(p_rows(j)(i));
-			if v_length > v_max_length then
-				v_max_length := v_length;
-			end if;
-		end loop;
+	if p_alignment = alignment_aligned then
+		for i in 1 .. p_column_count loop
+			--Find the maximum size for each column.
+			v_max_length := 0;
+			for j in 1 .. p_rows.count loop
+				v_length := length(p_rows(j)(i));
+				if v_length > v_max_length then
+					v_max_length := v_length;
+				end if;
+			end loop;
 
-		--TODO: Right-align numbers based on the decimal point
+			--TODO: Right-align numbers based on the decimal point
 
-		--Pad each value, if necessary.
-		for j in 1 .. p_rows.count loop
-			v_length := length(p_rows(j)(i));
-			if v_length < v_max_length then
-				p_rows(j)(i) := p_rows(j)(i) ||
-				lpad(' ', v_max_length - v_length, ' ');
-			end if;
+			--Pad each value, if necessary.
+			for j in 1 .. p_rows.count loop
+				v_length := length(p_rows(j)(i));
+				if v_length < v_max_length then
+					p_rows(j)(i) := p_rows(j)(i) ||
+					lpad(' ', v_max_length - v_length, ' ');
+				end if;
+			end loop;
 		end loop;
-	end loop;
+	end if;
 end align_values;
+
+
+--------------------------------------------------------------------------------
+function get_rows_from_sql
+(
+	v_column_count number,
+	v_cursor number,
+	v_column_metadata dbms_sql.desc_tab4,
+	p_date_style number,
+	p_nls_date_format varchar2
+) return rows_nt is
+	v_rows rows_nt := rows_nt();
+	v_row_count number;
+
+	--Store the results in a 2D array.
+	v_columns columns_nt;
+
+	--Store individual values.
+	v_date      date;
+	v_number    number;
+	v_varchar2  varchar2(32767);
+	v_nvarchar2 nvarchar2(32767);
+
+begin
+	loop
+		v_row_count := dbms_sql.fetch_rows(v_cursor);
+		exit when v_row_count = 0;
+
+		--Create new row entry, and new array for storing columns.
+		v_rows.extend;
+		v_columns := columns_nt();
+		v_columns.extend(v_column_count);
+
+		for i in 1 .. v_column_count loop
+			if v_column_metadata(i).col_type = dbms_types.typecode_date then
+				dbms_sql.column_value(v_cursor, i, v_date);
+				v_columns(i) := get_string_from_date(v_date, p_date_style, p_nls_date_format);
+
+			elsif v_column_metadata(i).col_type = dbms_types.typecode_number then
+				dbms_sql.column_value(v_cursor, i, v_number);
+				v_columns(i) := get_string_from_number(v_number);
+			elsif v_column_metadata(i).col_type in (dbms_types.typecode_char, dbms_types.typecode_varchar2, dbms_types.typecode_varchar) then
+				dbms_sql.column_value(v_cursor, i, v_varchar2);
+				v_columns(i) := get_string_from_varchar2(v_varchar2);
+			elsif v_column_metadata(i).col_type in (dbms_types.typecode_nchar, dbms_types.typecode_nvarchar2) then
+				dbms_sql.column_value(v_cursor, i, v_nvarchar2);
+				v_columns(i) := get_string_from_nvarchar2(v_nvarchar2);
+			else
+				raise_application_error(-20000, 'Unexpected type - not yet implemented.');
+			end if;
+		end loop;
+
+		v_rows(v_rows.count) := v_columns;
+	end loop;
+
+	return v_rows;
+end get_rows_from_sql;
+
+
+--------------------------------------------------------------------------------
+function get_clob_from_arrays
+(
+	p_table_name varchar2,
+	v_header_columns columns_nt,
+	v_column_count number,
+	v_rows rows_nt,
+	p_sql_terminator varchar2,
+	p_plsql_terminator varchar2
+) return clob is
+	v_output clob;
+	v_row clob;
+begin
+	--Create the initial INSERT statement: insert into table(columns)
+	v_output := v_output || g_insert_into || ' ' || trim(p_table_name) || '(';
+
+	--Add each column into a comma separated list.
+	for i in 1 .. v_header_columns.count loop
+		v_output := v_output || get_with_quotes_if_necessary(v_header_columns(i));
+		if i <> v_header_columns.count then
+			v_output := v_output || ',';
+		end if;
+	end loop;
+
+	v_output := v_output || ')' || chr(10);
+
+	--TODO: What if no rows?
+
+	--Create row statements.
+	for i in 1 .. v_rows.count loop
+		v_row := g_select || ' ';
+
+		for j in 1 .. v_column_count loop
+			dbms_lob.append(v_row, v_rows(i)(j));
+			if j <> v_column_count then
+				dbms_lob.append(v_row, ',');
+			end if;
+		end loop;
+
+		v_row := v_row || ' ' || g_from_dual || case when i <> v_rows.count then ' ' || g_union_all else null end;
+
+		if i = v_rows.count then
+			v_row := v_row || p_sql_terminator;
+		end if;
+
+		--v_output := v_output || v_row || chr(10);
+		dbms_lob.append(v_output, v_row);
+		dbms_lob.append(v_output, chr(10));
+	end loop;
+
+	return v_output;
+end get_clob_from_arrays;
 
 
 --------------------------------------------------------------------------------
@@ -318,7 +454,6 @@ function get_script
 	v_column_count number;
 	--TODO: Use conditional compilation to support older versions?
 	v_column_metadata  dbms_sql.desc_tab4;
-	v_row_count number;
 
 	v_output clob;
 	v_undefined integer;
@@ -358,27 +493,17 @@ dbms_types.typecode_urowid
 
 	--Store the results in a 2D array.
 	v_header_columns columns_nt := columns_nt();
-	v_columns columns_nt;
 	v_rows rows_nt := rows_nt();
-	v_row clob;
-
-
-	--Store individual values.
-	v_date      date;
-	v_number    number;
-	v_varchar2  varchar2(32767);
-	v_nvarchar2 nvarchar2(32767);
 
 begin
+	--Verify parameters and set some globals.
 	verify_parameters(p_date_style, p_nls_date_format, p_alignment, p_case_style);
 	set_keyword_case(p_case_style);
-
 
 	--Begin parsing.
 	v_cursor := dbms_sql.open_cursor;
 	dbms_sql.parse(v_cursor, p_select, dbms_sql.native);
 	dbms_sql.describe_columns3(v_cursor, v_column_count, v_column_metadata);
-
 
 	--Store column header information.
 	for i in 1 .. v_column_count loop
@@ -386,102 +511,16 @@ begin
 		v_header_columns(v_header_columns.count) := v_column_metadata(i).col_name;
 	end loop;
 
-
-	--Define variables.
-	for i in 1 .. v_column_count loop
-		if v_column_metadata(i).col_type = dbms_types.typecode_date then
-			dbms_sql.define_column(v_cursor, i, v_date);
-		elsif v_column_metadata(i).col_type = dbms_types.typecode_number then
-			dbms_sql.define_column(v_cursor, i, v_number);
-		elsif v_column_metadata(i).col_type in (dbms_types.typecode_char, dbms_types.typecode_varchar2, dbms_types.typecode_varchar) then
-			dbms_sql.define_column(v_cursor, i, v_varchar2, 32767);
-		elsif v_column_metadata(i).col_type in (dbms_types.typecode_nchar, dbms_types.typecode_nvarchar2) then
-			dbms_sql.define_column(v_cursor, i, v_nvarchar2, 32767);
-		end if;
-
-	end loop;
-
-	--Start the execution.
+	--Start dynamic execution, retrieve data and format it.
+	define_variables(v_column_count, v_column_metadata, v_cursor);
 	v_undefined := dbms_sql.execute(v_cursor);
+	v_rows := get_rows_from_sql(v_column_count, v_cursor, v_column_metadata, p_date_style, p_nls_date_format);
+	align_values(p_alignment, v_column_count, v_rows);
+	v_output := get_clob_from_arrays(p_table_name, v_header_columns, v_column_count, v_rows, p_sql_terminator, p_plsql_terminator);
 
+	--Finalize the output.
 
-	--Add each row.
-	loop
-		v_row_count := dbms_sql.fetch_rows(v_cursor);
-		exit when v_row_count = 0;
-
-		--Create new row entry, and new array for storing columns.
-		v_rows.extend;
-		v_columns := columns_nt();
-		v_columns.extend(v_column_count);
-
-		for i in 1 .. v_column_count loop
-			if v_column_metadata(i).col_type = dbms_types.typecode_date then
-				dbms_sql.column_value(v_cursor, i, v_date);
-				v_columns(i) := get_string_from_date(v_date, p_date_style, p_nls_date_format );
-			elsif v_column_metadata(i).col_type = dbms_types.typecode_number then
-				dbms_sql.column_value(v_cursor, i, v_number);
-				v_columns(i) := get_string_from_number(v_number);
-			elsif v_column_metadata(i).col_type in (dbms_types.typecode_char, dbms_types.typecode_varchar2, dbms_types.typecode_varchar) then
-				dbms_sql.column_value(v_cursor, i, v_varchar2);
-				v_columns(i) := get_string_from_varchar2(v_varchar2);
-			elsif v_column_metadata(i).col_type in (dbms_types.typecode_nchar, dbms_types.typecode_nvarchar2) then
-				dbms_sql.column_value(v_cursor, i, v_nvarchar2);
-				v_columns(i) := get_string_from_nvarchar2(v_nvarchar2);
-			else
-				raise_application_error(-2000, 'Unexpected type - todo');
-			end if;
-		end loop;
-
-		v_rows(v_rows.count) := v_columns;
-	end loop;
-
-	--Create the initial INSERT statement: insert into table(columns)
-	v_output := v_output || g_insert_into || ' ' || trim(p_table_name) || '(';
-
-	--Add each column into a comma separated list.
-	for i in 1 .. v_header_columns.count loop
-		v_output := v_output || get_with_quotes_if_necessary(v_header_columns(i));
-		if i <> v_header_columns.count then
-			v_output := v_output || ',';
-		end if;
-	end loop;
-
-	v_output := v_output || ')' || chr(10);
-
-	--TODO: What if no rows?
-
-	--Align values to make prettier output.
-	if p_alignment = alignment_aligned then
-		align_values(v_columns.count, v_rows);
-	end if;
-
-	--Create row statements.
-	for i in 1 .. v_rows.count loop
-		v_row := g_select || ' ';
-
-		for j in 1 .. v_columns.count loop
-			dbms_lob.append(v_row, v_rows(i)(j));
-			if j <> v_columns.count then
-				dbms_lob.append(v_row, ',');
-			end if;
-		end loop;
-
-		v_row := v_row || ' ' || g_from_dual || case when i <> v_rows.count then ' ' || g_union_all else null end;
-
-		if i = v_rows.count then
-			v_row := v_row || p_sql_terminator;
-		end if;
-
-		--v_output := v_output || v_row || chr(10);
-		dbms_lob.append(v_output, v_row);
-		dbms_lob.append(v_output, chr(10));
-	end loop;
-
-
-	--Finalize.
 	--dbms_lob.append(get_header(p_table_name, v_rows.count, p_date_style, p_nls_date_format, p_header), v_output);
-
 
 	add_header(v_output, p_table_name, v_rows.count, p_date_style, p_nls_date_format, p_header, p_header_custom_value);
 	--add_footer(v_output);
