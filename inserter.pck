@@ -2,20 +2,31 @@ create or replace package inserter authid current_user is
 
 --Constants used for parameters.
 --(Created as functions because package variables cannot be referenced in SQL.)
-function DATE_STYLE_ANSI_LITERAL  return number;
-function DATE_STYLE_TO_DATE       return number;
-function DATE_STYLE_ALTER_SESSION return number;
+function DATE_STYLE_ANSI_LITERAL        return number;
+function DATE_STYLE_TO_DATE             return number;
+function DATE_STYLE_ALTER_SESSION       return number;
 
-function ALIGNMENT_UNALIGNED      return number;
-function ALIGNMENT_ALIGNED        return number;
+function ALIGNMENT_UNALIGNED            return number;
+function ALIGNMENT_ALIGNED              return number;
 
-function CASE_UPPER               return number;
-function CASE_LOWER               return number;
-function CASE_CAMEL               return number;
+function CASE_UPPER                     return number;
+function CASE_LOWER                     return number;
+function CASE_CAMEL                     return number;
 
-function HEADER_ON                return number;
-function HEADER_OFF               return number;
-function HEADER_CUSTOM            return number;
+function HEADER_ON                      return number;
+function HEADER_OFF                     return number;
+function HEADER_CUSTOM                  return number;
+
+function INSERT_STYLE_UNION_ALL         return number;
+function INSERT_STYLE_INSERT_ALL        return number;
+function INSERT_STYLE_VALUES            return number;
+function INSERT_STYLE_VALUES_PLSQLBLOCK return number;
+
+function BATCH_SIZE_ALL                 return number;
+
+function COMMIT_STYLE_AT_END            return number;
+function COMMIT_STYLE_NONE              return number;
+function COMMIT_STYLE_PER_BATCH         return number;
 
 --Main function
 function get_script
@@ -29,7 +40,10 @@ function get_script
 	p_header              number   default header_on,
 	p_header_custom_value varchar2 default null,
 	p_sql_terminator      varchar2 default ';',
-	p_plsql_terminator    varchar2 default chr(10)||'/'
+	p_plsql_terminator    varchar2 default chr(10)||'/',
+	p_insert_style        number default insert_style_union_all,
+	p_batch_size          number default 100,
+	p_commit_style        number default commit_style_at_end
 ) return clob;
 
 end;
@@ -52,24 +66,37 @@ g_date                varchar2(100);
 g_to_date             varchar2(100);
 
 --Functions that act like constants.
-function DATE_STYLE_ANSI_LITERAL  return number is begin return 1; end;
-function DATE_STYLE_TO_DATE       return number is begin return 2; end;
-function DATE_STYLE_ALTER_SESSION return number is begin return 3; end;
+function DATE_STYLE_ANSI_LITERAL        return number is begin return 1; end;
+function DATE_STYLE_TO_DATE             return number is begin return 2; end;
+function DATE_STYLE_ALTER_SESSION       return number is begin return 3; end;
 
-function ALIGNMENT_UNALIGNED      return number is begin return 5; end;
-function ALIGNMENT_ALIGNED        return number is begin return 4; end;
+function ALIGNMENT_UNALIGNED            return number is begin return 5; end;
+function ALIGNMENT_ALIGNED              return number is begin return 4; end;
 
-function CASE_LOWER               return number is begin return 7; end;
-function CASE_UPPER               return number is begin return 6; end;
-function CASE_CAMEL               return number is begin return 8; end;
+function CASE_LOWER                     return number is begin return 7; end;
+function CASE_UPPER                     return number is begin return 6; end;
+function CASE_CAMEL                     return number is begin return 8; end;
 
-function HEADER_ON                return number is begin return 9; end;
-function HEADER_OFF               return number is begin return 10; end;
-function HEADER_CUSTOM            return number is begin return 11; end;
+function HEADER_ON                      return number is begin return 9; end;
+function HEADER_OFF                     return number is begin return 10; end;
+function HEADER_CUSTOM                  return number is begin return 11; end;
+
+function INSERT_STYLE_UNION_ALL         return number is begin return 12; end;
+function INSERT_STYLE_INSERT_ALL        return number is begin return 13; end;
+function INSERT_STYLE_VALUES            return number is begin return 14; end;
+function INSERT_STYLE_VALUES_PLSQLBLOCK return number is begin return 15; end;
+
+function BATCH_SIZE_ALL                 return number is begin return 16; end;
+
+function COMMIT_STYLE_AT_END            return number is begin return 17; end;
+function COMMIT_STYLE_NONE              return number is begin return 18; end;
+function COMMIT_STYLE_PER_BATCH         return number is begin return 19; end;
 
 
 --------------------------------------------------------------------------------------------------------------------------
-procedure verify_parameters(p_date_style number, p_nls_date_format varchar2, p_alignment number, p_case_style number) is
+procedure verify_parameters(p_date_style number, p_nls_date_format varchar2, p_alignment number, p_case_style number,
+	p_header number, p_header_custom_value varchar2, p_insert_style number, p_batch_size number, p_commit_style number
+) is
 	v_throwaway varchar2(32767);
 begin
 	--Check that P_DATE_STYLE is correct.
@@ -110,6 +137,10 @@ begin
 	else
 		raise_application_error(-20000, 'P_CASE_STYLE must be set to either UPPER, LOWER, or CAMEL.');
 	end if;
+
+	--TODO:
+	--p_header, p_header_custom_value, p_insert_style, p_batch_size, p_commit_style
+
 
 end verify_parameters;
 
@@ -326,6 +357,22 @@ end align_values;
 
 
 --------------------------------------------------------------------------------
+function get_column_expression(v_header_columns columns_nt) return clob is
+	v_expression clob;
+begin
+	--Add each column into a comma separated list.
+	for i in 1 .. v_header_columns.count loop
+		v_expression := v_expression || get_with_quotes_if_necessary(v_header_columns(i));
+		if i <> v_header_columns.count then
+			v_expression := v_expression || ',';
+		end if;
+	end loop;
+
+	return v_expression;
+end get_column_expression;
+
+
+--------------------------------------------------------------------------------
 function get_rows_from_sql
 (
 	v_column_count number,
@@ -385,47 +432,58 @@ end get_rows_from_sql;
 --------------------------------------------------------------------------------
 function get_clob_from_arrays
 (
-	p_table_name varchar2,
-	v_header_columns columns_nt,
-	v_column_count number,
-	v_rows rows_nt,
-	p_sql_terminator varchar2,
-	p_plsql_terminator varchar2
+	p_table_name        varchar2,
+	p_column_expression clob,
+	v_column_count      number,
+	v_rows              rows_nt,
+	p_sql_terminator    varchar2,
+	p_plsql_terminator  varchar2,
+	p_insert_style      number,
+	p_batch_size        number,
+	p_commit_style      number
 ) return clob is
+	v_values_expression clob;
 	v_output clob;
 	v_row clob;
 begin
-	--Create the initial INSERT statement: insert into table(columns)
-	v_output := v_output || g_insert_into || ' ' || trim(p_table_name) || '(';
-
-	--Add each column into a comma separated list.
-	for i in 1 .. v_header_columns.count loop
-		v_output := v_output || get_with_quotes_if_necessary(v_header_columns(i));
-		if i <> v_header_columns.count then
-			v_output := v_output || ',';
-		end if;
-	end loop;
-
-	v_output := v_output || ')' || chr(10);
-
 	--TODO: What if no rows?
 
 	--Create row statements.
 	for i in 1 .. v_rows.count loop
-		v_row := g_select || ' ';
-
-		for j in 1 .. v_column_count loop
-			dbms_lob.append(v_row, v_rows(i)(j));
-			if j <> v_column_count then
-				dbms_lob.append(v_row, ',');
+		if p_insert_style= insert_style_union_all then
+			--Start a batch.
+			if i = 1 or mod(i-1, p_batch_size) = 0 then
+				v_output := v_output || g_insert_into || ' ' || trim(p_table_name) || '(' || p_column_expression || ')' || chr(10);
 			end if;
-		end loop;
 
-		v_row := v_row || ' ' || g_from_dual || case when i <> v_rows.count then ' ' || g_union_all else null end;
+			--Fill out a row.
+			v_row := g_select || ' ';
 
-		if i = v_rows.count then
-			v_row := v_row || p_sql_terminator;
+			for j in 1 .. v_column_count loop
+				dbms_lob.append(v_row, v_rows(i)(j));
+				if j <> v_column_count then
+					dbms_lob.append(v_row, ',');
+				end if;
+			end loop;
+
+			v_row := v_row || ' ' || g_from_dual;
+
+			--End a batch.
+			if i = v_rows.count or mod(i, p_batch_size) = 0 then
+				v_row := v_row || p_sql_terminator;
+
+				if i = v_rows.count and p_commit_style in (commit_style_at_end, commit_style_per_batch) then
+					v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
+				elsif p_commit_style = commit_style_per_batch then
+					v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
+				end if;
+			--Or end just the row.
+			else
+				v_row := v_row || ' ' || g_union_all;
+			end if;
 		end if;
+
+		--TODO: Other styles
 
 		--v_output := v_output || v_row || chr(10);
 		dbms_lob.append(v_output, v_row);
@@ -448,56 +506,27 @@ function get_script
 	p_header              number   default header_on,
 	p_header_custom_value varchar2 default null,
 	p_sql_terminator      varchar2 default ';',
-	p_plsql_terminator    varchar2 default chr(10)||'/'
+	p_plsql_terminator    varchar2 default chr(10)||'/',
+	p_insert_style        number default insert_style_union_all,
+	p_batch_size          number default 100,
+	p_commit_style        number default commit_style_at_end
 ) return clob is
 	v_cursor number;
 	v_column_count number;
 	--TODO: Use conditional compilation to support older versions?
 	v_column_metadata  dbms_sql.desc_tab4;
 
+	v_column_expression clob;
 	v_output clob;
 	v_undefined integer;
-
-
-/*
-dbms_types.typecode_date
-dbms_types.typecode_number
-dbms_types.typecode_raw
-dbms_types.typecode_char
-dbms_types.typecode_varchar2
-dbms_types.typecode_varchar
-dbms_types.typecode_mlslabel
-dbms_types.typecode_blob
-dbms_types.typecode_bfile
-dbms_types.typecode_clob
-dbms_types.typecode_cfile
-dbms_types.typecode_timestamp
-dbms_types.typecode_timestamp_tz
-dbms_types.typecode_timestamp_ltz
-dbms_types.typecode_interval_ym
-dbms_types.typecode_interval_ds
-dbms_types.typecode_ref
-dbms_types.typecode_object
-dbms_types.typecode_varray
-dbms_types.typecode_table
-dbms_types.typecode_namedcollection
-dbms_types.typecode_opaque
-dbms_types.typecode_nchar
-dbms_types.typecode_nvarchar2
-dbms_types.typecode_nclob
-dbms_types.typecode_bfloat
-dbms_types.typecode_bdouble
-dbms_types.typecode_urowid
-*/
-
 
 	--Store the results in a 2D array.
 	v_header_columns columns_nt := columns_nt();
 	v_rows rows_nt := rows_nt();
-
 begin
 	--Verify parameters and set some globals.
-	verify_parameters(p_date_style, p_nls_date_format, p_alignment, p_case_style);
+	verify_parameters(p_date_style, p_nls_date_format, p_alignment, p_case_style,
+		p_header, p_header_custom_value, p_insert_style, p_batch_size, p_commit_style);
 	set_keyword_case(p_case_style);
 
 	--Begin parsing.
@@ -516,13 +545,12 @@ begin
 	v_undefined := dbms_sql.execute(v_cursor);
 	v_rows := get_rows_from_sql(v_column_count, v_cursor, v_column_metadata, p_date_style, p_nls_date_format);
 	align_values(p_alignment, v_column_count, v_rows);
-	v_output := get_clob_from_arrays(p_table_name, v_header_columns, v_column_count, v_rows, p_sql_terminator, p_plsql_terminator);
+	v_column_expression := get_column_expression(v_header_columns);
+	v_output := get_clob_from_arrays(p_table_name, v_column_expression, v_column_count, v_rows, p_sql_terminator, p_plsql_terminator, p_insert_style, p_batch_size, p_commit_style);
 
-	--Finalize the output.
-
-	--dbms_lob.append(get_header(p_table_name, v_rows.count, p_date_style, p_nls_date_format, p_header), v_output);
-
+	--Add header and footer.
 	add_header(v_output, p_table_name, v_rows.count, p_date_style, p_nls_date_format, p_header, p_header_custom_value);
+	--TODO:
 	--add_footer(v_output);
 
 	dbms_sql.close_cursor(v_cursor);
