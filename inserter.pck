@@ -55,15 +55,18 @@ create or replace package body inserter is
 type columns_nt is table of varchar2(32767);
 type rows_nt is table of columns_nt;
 
---Keywords, for case sensitivity.
-g_insert_into         varchar2(100);
-g_select              varchar2(100);
-g_null                varchar2(100);
-g_from_dual           varchar2(100);
-g_union_all           varchar2(100);
-g_timestamp           varchar2(100);
-g_date                varchar2(100);
-g_to_date             varchar2(100);
+--Keywords, listed like this to simplify case sensitivity.
+g_insert_into         varchar2(100) := 'insert into';
+g_insert_all          varchar2(100) := 'insert all';
+g_into                varchar2(100) := 'into';
+g_values              varchar2(100) := 'values';
+g_select              varchar2(100) := 'select';
+g_null                varchar2(100) := 'null';
+g_from_dual           varchar2(100) := 'from dual';
+g_union_all           varchar2(100) := 'union all';
+g_timestamp           varchar2(100) := 'timestamp';
+g_date                varchar2(100) := 'date';
+g_to_date             varchar2(100) := 'to_date';
 
 --Functions that act like constants.
 function DATE_STYLE_ANSI_LITERAL        return number is begin return 1; end;
@@ -148,33 +151,31 @@ end verify_parameters;
 --------------------------------------------------------------------------------
 procedure set_keyword_case(p_case_style number) is
 begin
+	--Lower is the default, set upper and camel case if necessary.
 	if p_case_style = case_upper then
-		g_insert_into         := 'INSERT INTO';
-		g_select              := 'SELECT';
-		g_null                := 'NULL';
-		g_from_dual           := 'FROM DUAL';
-		g_union_all           := 'UNION ALL';
-		g_timestamp           := 'TIMESTAMP';
-		g_date                := 'DATE';
-		g_to_date             := 'TO_DATE';
-	elsif p_case_style = case_lower then
-		g_insert_into         := 'insert into';
-		g_select              := 'select';
-		g_null                := 'null';
-		g_from_dual           := 'from dual';
-		g_union_all           := 'union all';
-		g_timestamp           := 'timestamp';
-		g_date                := 'date';
-		g_to_date             := 'to_date';
+		g_insert_into := upper(g_insert_into);
+		g_insert_all  := upper(g_insert_all);
+		g_into        := upper(g_into);
+		g_values      := upper(g_values);
+		g_select      := upper(g_select);
+		g_null        := upper(g_null);
+		g_from_dual   := upper(g_from_dual);
+		g_union_all   := upper(g_union_all);
+		g_timestamp   := upper(g_timestamp);
+		g_date        := upper(g_date);
+		g_to_date     := upper(g_to_date);
 	elsif p_case_style = case_camel then
-		g_insert_into         := 'Insert Into';
-		g_select              := 'Select';
-		g_null                := 'Null';
-		g_from_dual           := 'From Dual';
-		g_union_all           := 'Union All';
-		g_timestamp           := 'Timestamp';
-		g_date                := 'Date';
-		g_to_date             := 'To_Date';
+		g_insert_into := initcap(g_insert_into);
+		g_insert_all  := initcap(g_insert_all);
+		g_into        := initcap(g_into);
+		g_values      := initcap(g_values);
+		g_select      := initcap(g_select);
+		g_null        := initcap(g_null);
+		g_from_dual   := initcap(g_from_dual);
+		g_union_all   := initcap(g_union_all);
+		g_timestamp   := initcap(g_timestamp);
+		g_date        := initcap(g_date);
+		g_to_date     := initcap(g_to_date);
 	end if;
 end set_keyword_case;
 
@@ -360,6 +361,8 @@ end align_values;
 function get_column_expression(v_header_columns columns_nt) return clob is
 	v_expression clob;
 begin
+	--TODO: Use paramter to determine where to get value?
+
 	--Add each column into a comma separated list.
 	for i in 1 .. v_header_columns.count loop
 		v_expression := v_expression || get_with_quotes_if_necessary(v_header_columns(i));
@@ -367,6 +370,11 @@ begin
 			v_expression := v_expression || ',';
 		end if;
 	end loop;
+
+	--Always used with parentheses, if there are any values.
+	if v_expression is not null then
+		v_expression := '(' || v_expression || ')';
+	end if;
 
 	return v_expression;
 end get_column_expression;
@@ -445,45 +453,77 @@ function get_clob_from_arrays
 	v_values_expression clob;
 	v_output clob;
 	v_row clob;
+
+
+	procedure add_values(i number) is
+	begin
+		for j in 1 .. v_column_count loop
+			dbms_lob.append(v_row, v_rows(i)(j));
+			if j <> v_column_count then
+				dbms_lob.append(v_row, ',');
+			end if;
+		end loop;
+	end add_values;
+
+	procedure end_batch(i number) is
+	begin
+		if i = v_rows.count or mod(i, p_batch_size) = 0 then
+			v_row := v_row || p_sql_terminator;
+
+			if i = v_rows.count and p_commit_style in (commit_style_at_end, commit_style_per_batch) then
+				v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
+			elsif p_commit_style = commit_style_per_batch then
+				v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
+			end if;
+		--Or end just the row.
+		else
+			if p_insert_style = insert_style_union_all then
+				v_row := v_row || ' ' || g_union_all;
+			elsif p_insert_style = insert_style_insert_all then
+				null;
+			--TODO: Other styles
+			end if;
+		end if;
+	end end_batch;
+
 begin
+	dbms_lob.createtemporary(v_output, true);
+
 	--TODO: What if no rows?
 
 	--Create row statements.
 	for i in 1 .. v_rows.count loop
-		if p_insert_style= insert_style_union_all then
+		v_row := null;
+
+		if p_insert_style = insert_style_union_all then
 			--Start a batch.
 			if i = 1 or mod(i-1, p_batch_size) = 0 then
-				v_output := v_output || g_insert_into || ' ' || trim(p_table_name) || '(' || p_column_expression || ')' || chr(10);
+				v_row := g_insert_into || ' ' || trim(p_table_name) || p_column_expression || chr(10);
 			end if;
 
 			--Fill out a row.
-			v_row := g_select || ' ';
-
-			for j in 1 .. v_column_count loop
-				dbms_lob.append(v_row, v_rows(i)(j));
-				if j <> v_column_count then
-					dbms_lob.append(v_row, ',');
-				end if;
-			end loop;
-
+			v_row := v_row || g_select || ' ';
+			add_values(i);
 			v_row := v_row || ' ' || g_from_dual;
 
 			--End a batch.
-			if i = v_rows.count or mod(i, p_batch_size) = 0 then
-				v_row := v_row || p_sql_terminator;
-
-				if i = v_rows.count and p_commit_style in (commit_style_at_end, commit_style_per_batch) then
-					v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
-				elsif p_commit_style = commit_style_per_batch then
-					v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
-				end if;
-			--Or end just the row.
-			else
-				v_row := v_row || ' ' || g_union_all;
+			end_batch(i);
+		elsif p_insert_style = insert_style_insert_all then
+			--Start a batch.
+			if i = 1 or mod(i-1, p_batch_size) = 0 then
+				v_row := g_insert_all || chr(10);
 			end if;
+
+			--Fill out a row.
+			v_row := v_row || g_into || ' ' || trim(p_table_name) || p_column_expression || ' ' || g_values || '(';
+			add_values(i);
+
+			--End a batch.
+			v_row := v_row || ')';
+			end_batch(i);
 		end if;
 
-		--TODO: Other styles
+		--TODO: Add other styles
 
 		--v_output := v_output || v_row || chr(10);
 		dbms_lob.append(v_output, v_row);
