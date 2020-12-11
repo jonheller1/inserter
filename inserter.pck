@@ -106,17 +106,17 @@ begin
 	if p_date_style in (inserter.date_style_ansi_literal, inserter.date_style_to_date, inserter.date_style_alter_session) then
 		null;
 	else
-		raise_application_error(-20000, 'p_date_style must be one of INSERTER.ANSI_LITERAL, INSERTER.TO_DATE, or INSERTER.ALTER_SESSION.');
+		raise_application_error(-20000, 'p_date_style must be one of DATE_STYLE_ANSI_LITERAL, DATE_STYLE_TO_DATE, or DATE_STYLE_ALTER_SESSION.');
 	end if;
 
 	--Check that P_DATE_STYLE and P_NLS_DATE_FORMAT are set correctly together.
 	if p_date_style = inserter.date_style_ansi_literal and p_nls_date_format is not null then
-		raise_application_error(-20000, 'If P_DATE_STYLE is set to ANSI_LITERAL then P_NLS_DATE_FORMAT should be null.');
+		raise_application_error(-20000, 'If P_DATE_STYLE is set to DATE_STYLE_ANSI_LITERAL then P_NLS_DATE_FORMAT should be null.');
 	end if;
 
 	--Check that P_DATE_STYLE and P_NLS_DATE_FORMAT are set correctly together.
 	if p_date_style in (inserter.date_style_to_date, inserter.date_style_alter_session) and p_nls_date_format is null then
-		raise_application_error(-20000, 'If P_DATE_STYLE is set to TO_DATE or ALTER_SESSION, then P_NLS_DATE_FORMAT cannot be null.');
+		raise_application_error(-20000, 'If P_DATE_STYLE is set to DATE_STYLE_TO_DATE or DATE_STYLE_ALTER_SESSION, then P_NLS_DATE_FORMAT cannot be null.');
 	end if;
 
 	--Check the P_NLS_DATE_FORMAT if it was set.
@@ -131,18 +131,25 @@ begin
 	if p_alignment in (alignment_aligned, alignment_unaligned) then
 		null;
 	else
-		raise_application_error(-20000, 'P_ALIGNMENT must be set to either ALIGNED or UNALIGNED.');
+		raise_application_error(-20000, 'P_ALIGNMENT must be set to either ALIGNMENT_UNALIGNED or ALIGNMENT_ALIGNED.');
 	end if;
 
 	--Check P_CASE_STYLE.
 	if p_case_style in (case_upper, case_lower, case_camel) then
 		null;
 	else
-		raise_application_error(-20000, 'P_CASE_STYLE must be set to either UPPER, LOWER, or CAMEL.');
+		raise_application_error(-20000, 'P_CASE_STYLE must be set to either CASE_STYLE_LOWER, CASE_STYLE_UPPER, or CASE_STYLE_CAMEL.');
+	end if;
+
+	--Check P_HEADER.
+	if p_header in (header_on, header_off, header_custom) then
+		null;
+	else
+		raise_application_error(-20000, 'P_HEADER must be set to either HEADER_ON, HEADER_OFF, or HEADER_CUSTOM.');
 	end if;
 
 	--TODO:
-	--p_header, p_header_custom_value, p_insert_style, p_batch_size, p_commit_style
+	--p_header_custom_value, p_insert_style, p_batch_size, p_commit_style
 
 
 end verify_parameters;
@@ -467,7 +474,12 @@ function get_clob_from_arrays
 
 	procedure end_batch(i number) is
 	begin
+		--End the batch.
 		if i = v_rows.count or mod(i, p_batch_size) = 0 then
+			if p_insert_style = insert_style_insert_all then
+				v_row := v_row || chr(10) || 'select * from dual';
+			end if;
+
 			v_row := v_row || p_sql_terminator;
 
 			if i = v_rows.count and p_commit_style in (commit_style_at_end, commit_style_per_batch) then
@@ -475,13 +487,12 @@ function get_clob_from_arrays
 			elsif p_commit_style = commit_style_per_batch then
 				v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
 			end if;
-		--Or end just the row.
+		--End just the row.
 		else
 			if p_insert_style = insert_style_union_all then
 				v_row := v_row || ' ' || g_union_all;
 			elsif p_insert_style = insert_style_insert_all then
 				null;
-			--TODO: Other styles
 			end if;
 		end if;
 	end end_batch;
@@ -517,13 +528,25 @@ begin
 			--Fill out a row.
 			v_row := v_row || g_into || ' ' || trim(p_table_name) || p_column_expression || ' ' || g_values || '(';
 			add_values(i);
+			v_row := v_row || ')';
 
 			--End a batch.
-			v_row := v_row || ')';
 			end_batch(i);
+		elsif p_insert_style = insert_style_values then
+			--Every row is filled out the same.
+			v_row := g_insert_into || ' ' || trim(p_table_name) || p_column_expression || ' ' || g_values || '(';
+			add_values(i);
+			v_row := v_row || ')' || p_sql_terminator;
+
+			--Add commit, if necessary.
+			if p_commit_style = commit_style_per_batch or
+				(i = v_rows.count and p_commit_style = commit_style_at_end)
+			then
+				v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
+			end if;
 		end if;
 
-		--TODO: Add other styles
+		--TODO: Add VALUES_PLSQLBLOCK.
 
 		--v_output := v_output || v_row || chr(10);
 		dbms_lob.append(v_output, v_row);
