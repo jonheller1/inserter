@@ -67,6 +67,11 @@ g_union_all           varchar2(100) := 'union all';
 g_timestamp           varchar2(100) := 'timestamp';
 g_date                varchar2(100) := 'date';
 g_to_date             varchar2(100) := 'to_date';
+g_begin               varchar2(100) := 'begin';
+g_end                 varchar2(100) := 'end';
+--TODO: Parameterize this?
+g_indent              varchar2(100) := '  ';
+
 
 --Functions that act like constants.
 function DATE_STYLE_ANSI_LITERAL        return number is begin return 1; end;
@@ -171,6 +176,8 @@ begin
 		g_timestamp   := upper(g_timestamp);
 		g_date        := upper(g_date);
 		g_to_date     := upper(g_to_date);
+		g_begin       := upper(g_begin);
+		g_end         := upper(g_end);
 	elsif p_case_style = case_camel then
 		g_insert_into := initcap(g_insert_into);
 		g_insert_all  := initcap(g_insert_all);
@@ -183,6 +190,8 @@ begin
 		g_timestamp   := initcap(g_timestamp);
 		g_date        := initcap(g_date);
 		g_to_date     := initcap(g_to_date);
+		g_begin       := initcap(g_begin);
+		g_end         := initcap(g_end);
 	end if;
 end set_keyword_case;
 
@@ -476,16 +485,27 @@ function get_clob_from_arrays
 	begin
 		--End the batch.
 		if i = v_rows.count or mod(i, p_batch_size) = 0 then
-			if p_insert_style = insert_style_insert_all then
-				v_row := v_row || chr(10) || 'select * from dual';
-			end if;
+			if p_insert_style = insert_style_values_plsqlblock then
+				--Don't use sql_terminator here - inside a PL/SQL block, nothing but ";" will work.
+				v_row := v_row || chr(10) || g_end || ';' || p_plsql_terminator;
 
-			v_row := v_row || p_sql_terminator;
+				if i = v_rows.count and p_commit_style in (commit_style_at_end, commit_style_per_batch) then
+					v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
+				elsif p_commit_style = commit_style_per_batch then
+					v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
+				end if;
+			else
+				if p_insert_style = insert_style_insert_all then
+					v_row := v_row || chr(10) || 'select * from dual';
+				end if;
 
-			if i = v_rows.count and p_commit_style in (commit_style_at_end, commit_style_per_batch) then
-				v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
-			elsif p_commit_style = commit_style_per_batch then
-				v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
+				v_row := v_row || p_sql_terminator;
+
+				if i = v_rows.count and p_commit_style in (commit_style_at_end, commit_style_per_batch) then
+					v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
+				elsif p_commit_style = commit_style_per_batch then
+					v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
+				end if;
 			end if;
 		--End just the row.
 		else
@@ -501,6 +521,7 @@ begin
 	dbms_lob.createtemporary(v_output, true);
 
 	--TODO: What if no rows?
+	--TODO: Add row count message: "Insert X rows into TABLE_NAME."
 
 	--Create row statements.
 	for i in 1 .. v_rows.count loop
@@ -536,7 +557,8 @@ begin
 			--Every row is filled out the same.
 			v_row := g_insert_into || ' ' || trim(p_table_name) || p_column_expression || ' ' || g_values || '(';
 			add_values(i);
-			v_row := v_row || ')' || p_sql_terminator;
+			--(Don't use sql_terminator here - only ";" can ever work inside a PL/SQL block.
+			v_row := v_row || ');';
 
 			--Add commit, if necessary.
 			if p_commit_style = commit_style_per_batch or
@@ -544,11 +566,20 @@ begin
 			then
 				v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
 			end if;
+		elsif p_insert_style = insert_style_values_plsqlblock then
+			--Start a batch.
+			if i = 1 or mod(i-1, p_batch_size) = 0 then
+				v_row := g_begin || chr(10);
+			end if;
+
+			v_row := v_row || g_indent || g_insert_into || ' ' || trim(p_table_name) || p_column_expression || ' ' || g_values || '(';
+			add_values(i);
+			v_row := v_row || ')' || p_sql_terminator;
+
+			--End a batch.
+			end_batch(i);
 		end if;
 
-		--TODO: Add VALUES_PLSQLBLOCK.
-
-		--v_output := v_output || v_row || chr(10);
 		dbms_lob.append(v_output, v_row);
 		dbms_lob.append(v_output, chr(10));
 	end loop;
