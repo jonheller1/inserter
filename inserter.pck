@@ -28,6 +28,9 @@ function COMMIT_STYLE_AT_END            return number;
 function COMMIT_STYLE_NONE              return number;
 function COMMIT_STYLE_PER_BATCH         return number;
 
+function ESCAPE_STYLE_TWO_QUOTES        return number;
+function ESCAPE_STYLE_Q_QUOTES          return number;
+
 --Main function
 function get_script
 (
@@ -43,7 +46,8 @@ function get_script
 	p_plsql_terminator    varchar2 default chr(10)||'/',
 	p_insert_style        number default insert_style_union_all,
 	p_batch_size          number default 100,
-	p_commit_style        number default commit_style_at_end
+	p_commit_style        number default commit_style_at_end,
+	p_escape_style        number default escape_style_two_quotes
 ) return clob;
 
 end;
@@ -100,10 +104,12 @@ function COMMIT_STYLE_AT_END            return number is begin return 17; end;
 function COMMIT_STYLE_NONE              return number is begin return 18; end;
 function COMMIT_STYLE_PER_BATCH         return number is begin return 19; end;
 
+function ESCAPE_STYLE_TWO_QUOTES        return number is begin return 20; end;
+function ESCAPE_STYLE_Q_QUOTES          return number is begin return 21; end;
 
 --------------------------------------------------------------------------------------------------------------------------
 procedure verify_parameters(p_date_style number, p_nls_date_format varchar2, p_alignment number, p_case_style number,
-	p_header number, p_header_custom_value varchar2, p_insert_style number, p_batch_size number, p_commit_style number
+	p_header number, p_header_custom_value varchar2, p_insert_style number, p_batch_size number, p_commit_style number, p_escape_style number
 ) is
 	v_throwaway varchar2(32767);
 begin
@@ -156,6 +162,11 @@ begin
 	--TODO:
 	--p_header_custom_value, p_insert_style, p_batch_size, p_commit_style
 
+	if p_escape_style in (ESCAPE_STYLE_TWO_QUOTES, ESCAPE_STYLE_Q_QUOTES) then
+		null;
+	else
+		raise_application_error(-20000, 'p_escape_style must be set to either ESCAPE_STYLE_TWO_QUOTES or ESCAPE_STYLE_Q_QUOTES.');
+	end if;
 
 end verify_parameters;
 
@@ -324,18 +335,57 @@ begin
 end get_string_from_number;
 
 --------------------------------------------------------------------------------
-function get_string_from_varchar2(p_varchar2 varchar2) return varchar2 is
+function get_string_from_varchar2(p_varchar2 varchar2, p_escape_style number) return varchar2 is
+	v_escape varchar2(10);
+
+	---------------------------------------------------------------------------
+	--Return an available quote delimiter so there's no conflict with the user's code.
+	function get_available_quote_delimiter(p_string in varchar2) return varchar2 is
+		--All printable ASCII characters, excluding ones that would look confusing (',",@),
+		--and ones that match, such as [], <>, (), {}.
+		--This is a global constant to avoid being executed with each function call.
+		c_delimiter_candidates constant sys.odcivarchar2list := sys.odcivarchar2list(
+			'!','#','$','%','*','+',',','-','.','0','1','2','3','4','5','6','7','8','9',
+			':',';','=','?','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O',
+			'P','Q','R','S','T','U','V','W','X','Y','Z','^','_','`','a','b','c','d','e',
+			'f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x',
+			'y','z','|','~'
+		);
+		--TODO: Separate into opening and closing delimieters to use more popular ones like [].
+
+	begin
+		--Find the first available delimiter and return it.
+		for i in 1 .. c_delimiter_candidates.count loop
+			if instr(p_string, c_delimiter_candidates(i)||'''') = 0 then
+				return c_delimiter_candidates(i);
+			end if;
+		end loop;
+
+		--Exhausting all identifiers is possible, but incredibly unlikely.
+		raise_application_error(-20010, 'You have used every possible quote identifier, '||
+			'you must remove at least one from the code.');
+	end get_available_quote_delimiter;
 begin
 	if p_varchar2 is null then
 		return g_null;
 	else
-		--Escape quotes, add quotes around value.
-		return '''' || replace(p_varchar2, '''', '''''') || '''';
+		--For escaping, just double up the quotes.
+		if p_escape_style = escape_style_two_quotes then
+			return '''' || replace(p_varchar2, '''', '''''') || '''';
+		--For q quotes, find an available escape, and add it to the front and back if necessary.
+		else
+			if instr(p_varchar2, '''') <> 0 then
+				v_escape := get_available_quote_delimiter(p_varchar2);
+				return 'q''' || v_escape || p_varchar2 || v_escape || '''';
+			else
+				return '''' || p_varchar2 || '''';
+			end if;
+		end if;
 	end if;
 end get_string_from_varchar2;
 
 --------------------------------------------------------------------------------
-function get_string_from_nvarchar2(p_nvarchar2 varchar2) return varchar2 is
+function get_string_from_nvarchar2(p_nvarchar2 varchar2, p_escape_style number) return varchar2 is
 begin
 	--TODO
 	return p_nvarchar2;
@@ -403,7 +453,8 @@ function get_rows_from_sql
 	v_cursor number,
 	v_column_metadata dbms_sql.desc_tab4,
 	p_date_style number,
-	p_nls_date_format varchar2
+	p_nls_date_format varchar2,
+	p_escape_style number
 ) return rows_nt is
 	v_rows rows_nt := rows_nt();
 	v_row_count number;
@@ -437,10 +488,10 @@ begin
 				v_columns(i) := get_string_from_number(v_number);
 			elsif v_column_metadata(i).col_type in (dbms_types.typecode_char, dbms_types.typecode_varchar2, dbms_types.typecode_varchar) then
 				dbms_sql.column_value(v_cursor, i, v_varchar2);
-				v_columns(i) := get_string_from_varchar2(v_varchar2);
+				v_columns(i) := get_string_from_varchar2(v_varchar2, p_escape_style);
 			elsif v_column_metadata(i).col_type in (dbms_types.typecode_nchar, dbms_types.typecode_nvarchar2) then
 				dbms_sql.column_value(v_cursor, i, v_nvarchar2);
-				v_columns(i) := get_string_from_nvarchar2(v_nvarchar2);
+				v_columns(i) := get_string_from_nvarchar2(v_nvarchar2, p_escape_style);
 			else
 				raise_application_error(-20000, 'Unexpected type - not yet implemented.');
 			end if;
@@ -603,7 +654,8 @@ function get_script
 	p_plsql_terminator    varchar2 default chr(10)||'/',
 	p_insert_style        number default insert_style_union_all,
 	p_batch_size          number default 100,
-	p_commit_style        number default commit_style_at_end
+	p_commit_style        number default commit_style_at_end,
+	p_escape_style        number default escape_style_two_quotes
 ) return clob is
 	v_cursor number;
 	v_column_count number;
@@ -620,7 +672,7 @@ function get_script
 begin
 	--Verify parameters and set some globals.
 	verify_parameters(p_date_style, p_nls_date_format, p_alignment, p_case_style,
-		p_header, p_header_custom_value, p_insert_style, p_batch_size, p_commit_style);
+		p_header, p_header_custom_value, p_insert_style, p_batch_size, p_commit_style, p_escape_style);
 	set_keyword_case(p_case_style);
 
 	--Begin parsing.
@@ -637,7 +689,7 @@ begin
 	--Start dynamic execution, retrieve data and format it.
 	define_variables(v_column_count, v_column_metadata, v_cursor);
 	v_undefined := dbms_sql.execute(v_cursor);
-	v_rows := get_rows_from_sql(v_column_count, v_cursor, v_column_metadata, p_date_style, p_nls_date_format);
+	v_rows := get_rows_from_sql(v_column_count, v_cursor, v_column_metadata, p_date_style, p_nls_date_format, p_escape_style);
 	align_values(p_alignment, v_column_count, v_rows);
 	v_column_expression := get_column_expression(v_header_columns);
 	v_output := get_clob_from_arrays(p_table_name, v_column_expression, v_column_count, v_rows, p_sql_terminator, p_plsql_terminator, p_insert_style, p_batch_size, p_commit_style);
