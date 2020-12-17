@@ -76,6 +76,25 @@ g_end                 varchar2(100) := 'end';
 --TODO: Parameterize this?
 g_indent              varchar2(100) := '  ';
 
+--Almost all possible ASCII delimiters, except a few ones that would cause problems,
+-- like comma, double quote, ampersand, and at sign.
+--(These are global constants to avoid being executed with each function call.)
+c_start_delimiters constant sys.odcivarchar2list := sys.odcivarchar2list(
+	'[','{','<','(',
+	'!','#','$','%','*','+',',','-','.','0','1','2','3','4','5','6','7','8','9',
+	':',';','=','?','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O',
+	'P','Q','R','S','T','U','V','W','X','Y','Z','^','_','`','a','b','c','d','e',
+	'f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x',
+	'y','z','|','~'
+);
+c_end_delimiters constant sys.odcivarchar2list := sys.odcivarchar2list(
+	']','}','>',')',
+	'!','#','$','%','*','+',',','-','.','0','1','2','3','4','5','6','7','8','9',
+	':',';','=','?','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O',
+	'P','Q','R','S','T','U','V','W','X','Y','Z','^','_','`','a','b','c','d','e',
+	'f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x',
+	'y','z','|','~'
+);
 
 --Functions that act like constants.
 function DATE_STYLE_ANSI_LITERAL        return number is begin return 1; end;
@@ -336,28 +355,19 @@ end get_string_from_number;
 
 --------------------------------------------------------------------------------
 function get_string_from_varchar2(p_varchar2 varchar2, p_escape_style number) return varchar2 is
-	v_escape varchar2(10);
+	v_escape_start varchar2(1);
+	v_escape_end   varchar2(1);
 
 	---------------------------------------------------------------------------
-	--Return an available quote delimiter so there's no conflict with the user's code.
-	function get_available_quote_delimiter(p_string in varchar2) return varchar2 is
-		--All printable ASCII characters, excluding ones that would look confusing (',",@),
-		--and ones that match, such as [], <>, (), {}.
-		--This is a global constant to avoid being executed with each function call.
-		c_delimiter_candidates constant sys.odcivarchar2list := sys.odcivarchar2list(
-			'!','#','$','%','*','+',',','-','.','0','1','2','3','4','5','6','7','8','9',
-			':',';','=','?','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O',
-			'P','Q','R','S','T','U','V','W','X','Y','Z','^','_','`','a','b','c','d','e',
-			'f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x',
-			'y','z','|','~'
-		);
-		--TODO: Separate into opening and closing delimieters to use more popular ones like [].
-
+	--Return available quote delimiters so there's no conflict with the user's code.
+	procedure get_available_quote_delimiter(p_string in varchar2, p_start_delimiter out varchar2, p_end_delimiter out varchar2) is
 	begin
 		--Find the first available delimiter and return it.
-		for i in 1 .. c_delimiter_candidates.count loop
-			if instr(p_string, c_delimiter_candidates(i)||'''') = 0 then
-				return c_delimiter_candidates(i);
+		for i in 1 .. c_end_delimiters.count loop
+			if instr(p_string, c_end_delimiters(i)||'''') = 0 then
+				p_start_delimiter := c_start_delimiters(i);
+				p_end_delimiter   := c_end_delimiters(i);
+				return;
 			end if;
 		end loop;
 
@@ -375,8 +385,8 @@ begin
 		--For q quotes, find an available escape, and add it to the front and back if necessary.
 		else
 			if instr(p_varchar2, '''') <> 0 then
-				v_escape := get_available_quote_delimiter(p_varchar2);
-				return 'q''' || v_escape || p_varchar2 || v_escape || '''';
+				get_available_quote_delimiter(p_varchar2, v_escape_start, v_escape_end);
+				return 'q''' || v_escape_start || p_varchar2 || v_escape_end || '''';
 			else
 				return '''' || p_varchar2 || '''';
 			end if;
