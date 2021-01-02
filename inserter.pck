@@ -17,6 +17,10 @@ function HEADER_STYLE_ON                return number;
 function HEADER_STYLE_OFF               return number;
 function HEADER_STYLE_CUSTOM            return number;
 
+function FOOTER_STYLE_ON                return number;
+function FOOTER_STYLE_OFF               return number;
+function FOOTER_STYLE_CUSTOM            return number;
+
 function INSERT_STYLE_UNION_ALL         return number;
 function INSERT_STYLE_INSERT_ALL        return number;
 function INSERT_STYLE_VALUES            return number;
@@ -42,6 +46,8 @@ function get_script
 	p_case_style          number   default case_lower,
 	p_header_style        number   default header_style_on,
 	p_header_custom_value varchar2 default null,
+	p_footer_style        number   default footer_style_on,
+	p_footer_custom_value varchar2 default null,
 	p_sql_terminator      varchar2 default ';',
 	p_plsql_terminator    varchar2 default chr(10)||'/',
 	p_insert_style        number default insert_style_union_all,
@@ -112,23 +118,28 @@ function HEADER_STYLE_ON                return number is begin return 9; end;
 function HEADER_STYLE_OFF               return number is begin return 10; end;
 function HEADER_STYLE_CUSTOM            return number is begin return 11; end;
 
-function INSERT_STYLE_UNION_ALL         return number is begin return 12; end;
-function INSERT_STYLE_INSERT_ALL        return number is begin return 13; end;
-function INSERT_STYLE_VALUES            return number is begin return 14; end;
-function INSERT_STYLE_VALUES_PLSQLBLOCK return number is begin return 15; end;
+function FOOTER_STYLE_ON                return number is begin return 12; end;
+function FOOTER_STYLE_OFF               return number is begin return 13; end;
+function FOOTER_STYLE_CUSTOM            return number is begin return 14; end;
 
-function BATCH_SIZE_ALL                 return number is begin return 16; end;
+function INSERT_STYLE_UNION_ALL         return number is begin return 15; end;
+function INSERT_STYLE_INSERT_ALL        return number is begin return 16; end;
+function INSERT_STYLE_VALUES            return number is begin return 17; end;
+function INSERT_STYLE_VALUES_PLSQLBLOCK return number is begin return 18; end;
 
-function COMMIT_STYLE_AT_END            return number is begin return 17; end;
-function COMMIT_STYLE_NONE              return number is begin return 18; end;
-function COMMIT_STYLE_PER_BATCH         return number is begin return 19; end;
+function BATCH_SIZE_ALL                 return number is begin return 19; end;
 
-function ESCAPE_STYLE_TWO_QUOTES        return number is begin return 20; end;
-function ESCAPE_STYLE_Q_QUOTES          return number is begin return 21; end;
+function COMMIT_STYLE_AT_END            return number is begin return 20; end;
+function COMMIT_STYLE_NONE              return number is begin return 21; end;
+function COMMIT_STYLE_PER_BATCH         return number is begin return 22; end;
+
+function ESCAPE_STYLE_TWO_QUOTES        return number is begin return 23; end;
+function ESCAPE_STYLE_Q_QUOTES          return number is begin return 24; end;
 
 --------------------------------------------------------------------------------------------------------------------------
 procedure verify_parameters(p_date_style number, p_nls_date_format varchar2, p_alignment number, p_case_style number,
-	p_header_style number, p_header_custom_value varchar2, p_insert_style number, p_batch_size number, p_commit_style number, p_escape_style number
+	p_header_style number, p_header_custom_value varchar2, p_footer_style varchar2, p_footer_custom_value varchar2,
+	p_insert_style number, p_batch_size number, p_commit_style number, p_escape_style number
 ) is
 	v_throwaway varchar2(32767);
 begin
@@ -186,8 +197,23 @@ begin
 		raise_application_error(-20000, 'If P_HEADER_STYLE is set to HEADER_STYLE_CUSTOM, then P_HEADER_CUSTOM_VALUE should be non-null.');
 	end if;
 
+	--Check P_FOOTER.
+	if p_footer_style in (footer_style_on, footer_style_off, footer_style_custom) then
+		null;
+	else
+		raise_application_error(-20000, 'P_FOOTER_STYLE must be set to either FOOTER_STYLE_ON, FOOTER_STYLE_OFF, or FOOTER_STYLE_CUSTOM.');
+	end if;
+
+	if p_footer_style in (footer_style_on, footer_style_off) and p_footer_custom_value is not null then
+		raise_application_error(-20000, 'P_FOOTER_CUSTOM_VALUE is only useful if P_FOOTER_STYLE is set to FOOTER_STYLE_CUSTOM.');
+	end if;
+
+	if p_footer_style = footer_style_custom and p_footer_custom_value is null then
+		raise_application_error(-20000, 'If P_FOOTER_STYLE is set to FOOTER_STYLE_CUSTOM, then P_FOOTER_CUSTOM_VALUE should be non-null.');
+	end if;
+
 	--TODO:
-	--p_header_custom_value, p_insert_style, p_batch_size, p_commit_style
+	--p_insert_style, p_batch_size, p_commit_style
 
 	if p_escape_style in (ESCAPE_STYLE_TWO_QUOTES, ESCAPE_STYLE_Q_QUOTES) then
 		null;
@@ -257,6 +283,30 @@ begin
 end define_variables;
 
 
+--------------------------------------------------------------------------------
+procedure replace_header_footer_vars(
+	p_text in out nocopy clob,
+	p_table_name varchar2,
+	p_rowcount number
+) is
+	v_row_or_rows varchar2(100);
+begin
+	--Set singular or plural depending on the count.
+	if p_rowcount = 1 then
+		v_row_or_rows := 'row';
+	else
+		v_row_or_rows := 'rows';
+	end if;
+
+	--Replace variables, if any.
+	p_text := replace(replace(replace(replace(replace(p_text
+		,'#ROWCOUNT#', p_rowcount)
+		,'#ROW_OR_ROWS#', v_row_or_rows)
+		,'#USER#', user)
+		,'#DATE#', to_char(sysdate, 'YYYY-MM-DD HH24:MI:SS'))
+		,'#TABLE#', p_table_name);
+
+end replace_header_footer_vars;
 
 
 --------------------------------------------------------------------------------
@@ -275,36 +325,26 @@ procedure add_header
 	v_template varchar2(32767) := substr(replace(
 		q'[
 		------------------------------------------------------------------------
-		-- Insert #ROWCOUNT# #ROW_OR_ROWS# into #TABLE#.
+		-- Begin inserting #ROWCOUNT# #ROW_OR_ROWS# into #TABLE#.
 		-- This script was generated by #USER# on #DATE#.
 		------------------------------------------------------------------------
 		]'
 		,chr(10)||'		', chr(10))
 		,2);
 begin
-	--Set singular or plural depending on the count.
-	if p_rowcount = 1 then
-		v_row_or_rows := 'row';
-	else
-		v_row_or_rows := 'rows';
-	end if;
+	dbms_lob.createtemporary(v_header, true);
 
 	--Choose which header style to start with.
 	if p_header_style = header_style_on then
-		null;
+		v_header := v_template;
 	elsif p_header_style = header_style_off then
-		v_template := null;
+		null;
 	elsif p_header_style = header_style_custom then
-		v_template := p_header_custom_value;
+		v_header := p_header_custom_value;
 	end if;
 
-	--Replace variables, if any.	
-	v_header := replace(replace(replace(replace(replace(v_template
-		,'#ROWCOUNT#', p_rowcount)
-		,'#ROW_OR_ROWS#', v_row_or_rows)
-		,'#USER#', user)
-		,'#DATE#', to_char(sysdate, 'YYYY-MM-DD HH24:MI:SS'))
-		,'#TABLE#', p_table_name);
+	--Replace variables, if any.
+	replace_header_footer_vars(v_header, p_table_name, p_rowcount);
 
 	--Alter the session, if requested.
 	if p_date_style = inserter.date_style_alter_session then
@@ -317,13 +357,44 @@ begin
 end add_header;
 
 --------------------------------------------------------------------------------
-function get_footer return varchar2 is
+procedure add_footer
+(
+	p_output in out nocopy clob,
+	p_table_name varchar2,
+	p_rowcount number,
+	p_footer_style varchar2,
+	p_footer_custom_value varchar2
+) is
+	v_footer clob;
+	v_row_or_rows varchar2(100);
+	v_template varchar2(32767) := substr(replace(
+		q'[
+		------------------------------------------------------------------------
+		-- End inserting #ROWCOUNT# #ROW_OR_ROWS# into #TABLE#.
+		------------------------------------------------------------------------
+		]'
+		,chr(10)||'		', chr(10))
+		,2);
 begin
-	return 
-	q'[
-	--TODO
-	]';
-end get_footer;
+	dbms_lob.createtemporary(v_footer, true);
+
+	--Choose which footer style to start with.
+	if p_footer_style = footer_style_on then
+		v_footer := v_template;
+	elsif p_footer_style = footer_style_off then
+		null;
+	elsif p_footer_style = footer_style_custom then
+		v_footer := p_footer_custom_value;
+	end if;
+
+	--Replace variables, if any.
+	replace_header_footer_vars(v_footer, p_table_name, p_rowcount);
+
+	--Add the footer.
+	if v_footer is not null then
+		dbms_lob.append(p_output, v_footer);
+	end if;
+end add_footer;
 
 --------------------------------------------------------------------------------
 function get_with_quotes_if_necessary(p_string varchar2) return varchar2 is
@@ -677,6 +748,8 @@ function get_script
 	p_case_style          number   default case_lower,
 	p_header_style        number   default header_style_on,
 	p_header_custom_value varchar2 default null,
+	p_footer_style        number   default footer_style_on,
+	p_footer_custom_value varchar2 default null,
 	p_sql_terminator      varchar2 default ';',
 	p_plsql_terminator    varchar2 default chr(10)||'/',
 	p_insert_style        number default insert_style_union_all,
@@ -699,7 +772,8 @@ function get_script
 begin
 	--Verify parameters and set some globals.
 	verify_parameters(p_date_style, p_nls_date_format, p_alignment, p_case_style,
-		p_header_style, p_header_custom_value, p_insert_style, p_batch_size, p_commit_style, p_escape_style);
+		p_header_style, p_header_custom_value, p_footer_style, p_footer_custom_value,
+		p_insert_style, p_batch_size, p_commit_style, p_escape_style);
 	set_keyword_case(p_case_style);
 
 	--Begin parsing.
@@ -723,8 +797,7 @@ begin
 
 	--Add header and footer.
 	add_header(v_output, p_table_name, v_rows.count, p_date_style, p_nls_date_format, p_header_style, p_header_custom_value);
-	--TODO:
-	--add_footer(v_output);
+	add_footer(v_output, p_table_name, v_rows.count, p_footer_style, p_footer_custom_value);
 
 	dbms_sql.close_cursor(v_cursor);
 	--dbms_output.put_line(v_output);
