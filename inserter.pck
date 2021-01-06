@@ -26,14 +26,17 @@ function INSERT_STYLE_INSERT_ALL        return number;
 function INSERT_STYLE_VALUES            return number;
 function INSERT_STYLE_VALUES_PLSQLBLOCK return number;
 
-function BATCH_SIZE_ALL                 return number;
-
 function COMMIT_STYLE_AT_END            return number;
 function COMMIT_STYLE_NONE              return number;
 function COMMIT_STYLE_PER_BATCH         return number;
 
 function ESCAPE_STYLE_TWO_QUOTES        return number;
 function ESCAPE_STYLE_Q_QUOTES          return number;
+
+function COLUMN_LIST_DERIVED_FROM_SQL   return number;
+function COLUMN_LIST_DERIVED_FROM_TABLE return number;
+function COLUMN_LIST_NONE               return number;
+
 
 --Main function
 function get_script
@@ -53,7 +56,8 @@ function get_script
 	p_insert_style        number default insert_style_union_all,
 	p_batch_size          number default 100,
 	p_commit_style        number default commit_style_at_end,
-	p_escape_style        number default escape_style_two_quotes
+	p_escape_style        number default escape_style_two_quotes,
+	p_column_list         number default column_list_derived_from_sql
 ) return clob;
 
 end;
@@ -127,14 +131,16 @@ function INSERT_STYLE_INSERT_ALL        return number is begin return 16; end;
 function INSERT_STYLE_VALUES            return number is begin return 17; end;
 function INSERT_STYLE_VALUES_PLSQLBLOCK return number is begin return 18; end;
 
-function BATCH_SIZE_ALL                 return number is begin return 19; end;
-
 function COMMIT_STYLE_AT_END            return number is begin return 20; end;
 function COMMIT_STYLE_NONE              return number is begin return 21; end;
 function COMMIT_STYLE_PER_BATCH         return number is begin return 22; end;
 
 function ESCAPE_STYLE_TWO_QUOTES        return number is begin return 23; end;
 function ESCAPE_STYLE_Q_QUOTES          return number is begin return 24; end;
+
+function COLUMN_LIST_DERIVED_FROM_SQL   return number is begin return 25; end;
+function COLUMN_LIST_DERIVED_FROM_TABLE return number is begin return 26; end;
+function COLUMN_LIST_NONE               return number is begin return 27; end;
 
 --------------------------------------------------------------------------------------------------------------------------
 procedure verify_parameters(p_date_style number, p_nls_date_format varchar2, p_alignment number, p_case_style number,
@@ -212,8 +218,21 @@ begin
 		raise_application_error(-20000, 'If P_FOOTER_STYLE is set to FOOTER_STYLE_CUSTOM, then P_FOOTER_CUSTOM_VALUE should be non-null.');
 	end if;
 
+	if p_insert_style in (insert_style_union_all, insert_style_insert_all, insert_style_values, insert_style_values_plsqlblock) then
+		null;
+	else
+		raise_application_error(-20000, 'P_INSERT_STYLE must be set to either INSERT_STYLE_UNION_ALL, INSERT_STYLE_INSERT_ALL, INSERT_STYLE_VALUES, or INSERT_STYLE_VALUES_PLSQLBLOCK.');
+	end if;
+
+	--Check P_BATCH_SIZE.
+	if p_batch_size <= 0 or p_batch_size is null then
+		raise_application_error(-20000, 'P_BATCH_SIZE must be greater than zero.');
+	elsif p_batch_size <> trunc(p_batch_size) then
+		raise_application_error(-20000, 'P_BATCH_SIZE must be an integer value.');
+	end if;
+
 	--TODO:
-	--p_insert_style, p_batch_size, p_commit_style
+	--p_commit_style
 
 	if p_escape_style in (ESCAPE_STYLE_TWO_QUOTES, ESCAPE_STYLE_Q_QUOTES) then
 		null;
@@ -321,7 +340,6 @@ procedure add_header
 	p_header_custom_value varchar2
 ) is
 	v_header clob;
-	v_row_or_rows varchar2(100);
 	v_template varchar2(32767) := substr(replace(
 		q'[
 		------------------------------------------------------------------------
@@ -352,8 +370,10 @@ begin
 	end if;
 
 	--TODO: There's gotta be a better way to do this.
-	dbms_lob.append(v_header, p_output);
-	p_output := v_header;
+	if v_header is not null then
+		dbms_lob.append(v_header, p_output);
+		p_output := v_header;
+	end if;
 end add_header;
 
 --------------------------------------------------------------------------------
@@ -366,7 +386,6 @@ procedure add_footer
 	p_footer_custom_value varchar2
 ) is
 	v_footer clob;
-	v_row_or_rows varchar2(100);
 	v_template varchar2(32767) := substr(replace(
 		q'[
 		------------------------------------------------------------------------
@@ -615,7 +634,6 @@ function get_clob_from_arrays
 	p_batch_size        number,
 	p_commit_style      number
 ) return clob is
-	v_values_expression clob;
 	v_output clob;
 	v_row clob;
 
@@ -755,7 +773,8 @@ function get_script
 	p_insert_style        number default insert_style_union_all,
 	p_batch_size          number default 100,
 	p_commit_style        number default commit_style_at_end,
-	p_escape_style        number default escape_style_two_quotes
+	p_escape_style        number default escape_style_two_quotes,
+	p_column_list         number default column_list_derived_from_sql
 ) return clob is
 	v_cursor number;
 	v_column_count number;
