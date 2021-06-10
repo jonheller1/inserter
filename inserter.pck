@@ -565,18 +565,17 @@ function get_column_expression
 ) return clob is
 	v_expression clob;
 begin
-	--No list.
+	--No column list list.
 	if p_column_list = column_list_none then
 		return null;
 
-	--List from a table.
+	--Derive the column list from a table.
 	elsif p_column_list = column_list_derived_from_table then
 		declare
 			v_unused varchar2(4000);
 			v_cursor number;
 			v_column_count number;
-			--TODO: Use conditional compilation to support older versions?
-			v_column_metadata  dbms_sql.desc_tab4;
+			v_column_metadata dbms_sql.desc_tab;
 		begin
 			--Prevent SQL injection - this will raise an exception if the name is not a real name.
 			v_unused := dbms_assert.qualified_sql_name(p_table_name);
@@ -584,7 +583,7 @@ begin
 			--Begin parsing.
 			v_cursor := dbms_sql.open_cursor;
 			dbms_sql.parse(v_cursor, 'select * from '||p_table_name, dbms_sql.native);
-			dbms_sql.describe_columns3(v_cursor, v_column_count, v_column_metadata);
+			dbms_sql.describe_columns(v_cursor, v_column_count, v_column_metadata);
 
 			--Store column header information.
 			for i in 1 .. v_column_count loop
@@ -603,7 +602,7 @@ begin
 			return v_expression;
 		end;
 
-	--List from the columns.
+	--Derive column list from the columns in the SQL statement.
 	else
 		--Add each column into a comma separated list.
 		for i in 1 .. p_header_columns.count loop
