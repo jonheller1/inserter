@@ -25,7 +25,9 @@ g_test_count number := 0;
 g_passed_count number := 0;
 g_failed_count number := 0;
 
+
 --------------------------------------------------------------------------------
+--Check if values are equal, update global counter, and output failures.
 procedure assert_equals(p_test nvarchar2, p_expected nvarchar2, p_actual nvarchar2) is
 begin
 	g_test_count := g_test_count + 1;
@@ -42,9 +44,44 @@ end assert_equals;
 
 
 --------------------------------------------------------------------------------
-procedure test_simple is
+-- Trim text for testing. For readability, results are displayed in a string with
+-- an extra newline at the beginning, three tabs on each line, and a newline with
+-- two extra tabs at the end.
+function test_trimmer(p_input clob) return clob is
+	v_trimmed_output clob := p_input;
 begin
-	assert_equals('Simple.', 'X', 'X');
+	--Remove three tabs per line.
+	v_trimmed_output := replace(v_trimmed_output, chr(10)||chr(9)||chr(9)||chr(9), chr(10));
+	--Remove first, extra newline.
+	v_trimmed_output := substr(v_trimmed_output, 2);
+	--Remove last two tabs.
+	v_trimmed_output := substr(v_trimmed_output, 1, length(v_trimmed_output)-2);
+
+	return v_trimmed_output;
+end test_trimmer;
+
+
+--------------------------------------------------------------------------------
+procedure test_simple is
+	v_results clob;
+begin
+	--Simplest possible test of one value.
+	v_results := inserter.get_script
+	(
+		p_table_name => 'target_table',
+		p_select => 'select 1 a from dual',
+		p_header_style => inserter.header_style_off,
+		p_footer_style => inserter.footer_style_off
+	);
+
+	assert_equals('Simple 1',
+		test_trimmer(
+		q'[
+			insert into target_table(A)
+			select 1 from dual;
+			commit;
+		]'), v_results);
+
 end test_simple;
 
 --------------------------------------------------------------------------------
