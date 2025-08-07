@@ -47,7 +47,7 @@ end assert_equals;
 -- Trim text for testing. For readability, results are displayed in a string with
 -- an extra newline at the beginning, three tabs on each line, and a newline with
 -- two extra tabs at the end.
-function test_trimmer(p_input clob) return clob is
+function trim_test(p_input clob) return clob is
 	v_trimmed_output clob := p_input;
 begin
 	--Remove three tabs per line.
@@ -58,7 +58,32 @@ begin
 	v_trimmed_output := substr(v_trimmed_output, 1, length(v_trimmed_output)-2);
 
 	return v_trimmed_output;
-end test_trimmer;
+end trim_test;
+
+
+--------------------------------------------------------------------------------
+procedure tear_down is
+	v_table_does_not_exist exception;
+	pragma exception_init(v_table_does_not_exist, -00942);
+begin
+	execute immediate 'drop table inserter_test_table purge';
+exception when v_table_does_not_exist then null;
+end tear_down;
+
+--------------------------------------------------------------------------------
+procedure setup is
+begin
+	execute immediate
+	'
+		create table inserter_test_table
+		(
+			a_number number,
+			a_varchar2 varchar2(4000),
+			a_date date,
+			a_timestamp timestamp
+		)
+	';
+end setup;
 
 
 --------------------------------------------------------------------------------
@@ -75,14 +100,28 @@ begin
 	);
 
 	assert_equals('Simple 1',
-		test_trimmer(
+		trim_test(
 		q'[
 			insert into target_table(A)
 			select 1 from dual;
 			commit;
 		]'), v_results);
-
 end test_simple;
+
+
+--------------------------------------------------------------------------------
+procedure test_date_style is
+begin
+	null;
+
+/*
+function DATE_STYLE_ANSI_LITERAL        return number;
+function DATE_STYLE_TO_DATE             return number;
+function DATE_STYLE_ALTER_SESSION       return number;
+*/
+
+end test_date_style;
+
 
 --------------------------------------------------------------------------------
 procedure run is
@@ -98,8 +137,16 @@ begin
 	dbms_output.put_line('Inserter Test Summary');
 	dbms_output.put_line('----------------------------------------');
 
+	--Prepare for the tests.
+	tear_down;
+	setup;
+
 	--Run the tests.
 	test_simple;
+	test_date_style;
+
+	--Clean up the tests.
+	tear_down;
 
 	--Print summary of results.
 	dbms_output.put_line(null);

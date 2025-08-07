@@ -1,4 +1,7 @@
 create or replace package inserter authid current_user is
+--Copyright (C) 2025 Jon Heller.  This program is licensed under the LGPLv3.
+--See https://github.com/jonheller1/inserter for examples and documentation.
+
 
 --Constants used for parameters.
 --(Created as functions because package variables cannot be referenced in SQL.)
@@ -25,6 +28,7 @@ function INSERT_STYLE_UNION_ALL         return number;
 function INSERT_STYLE_INSERT_ALL        return number;
 function INSERT_STYLE_VALUES            return number;
 function INSERT_STYLE_VALUES_PLSQLBLOCK return number;
+--function INSERT_STYLE_TABLE_VALUES      return number; -- TODO - New 23ai style.
 
 function COMMIT_STYLE_AT_END            return number;
 function COMMIT_STYLE_NONE              return number;
@@ -63,6 +67,9 @@ function get_script
 end;
 /
 create or replace package body inserter is
+--Copyright (C) 2025 Jon Heller.  This program is licensed under the LGPLv3.
+--See https://github.com/jonheller1/inserter for examples and documentation.
+
 
 --Store the results in a 2D array.
 --TODO: Use CLOB instead, but it's much slower.
@@ -168,7 +175,7 @@ begin
 
 	--Check the P_NLS_DATE_FORMAT if it was set.
 	begin
-		v_throwaway := to_char(sysdate, p_nls_date_format);
+		v_throwaway := to_char(sysdate, p_nls_date_format); --ignore
 	exception when others then
 		raise_application_error(-20000, 'The value you entered for P_NLS_DATE_FORMAT is not valid. It raised this exception: '||chr(10)||
 			sqlerrm);
@@ -308,7 +315,7 @@ begin
 			dbms_sql.define_column(p_cursor, i, v_varchar2, 32767);
 		elsif p_column_metadata(i).col_type in (dbms_types.typecode_nchar, dbms_types.typecode_nvarchar2) then
 			dbms_sql.define_column(p_cursor, i, v_nvarchar2, 32767);
-		--TODO: Add other types here.
+		--TODO: Add more types here.
 		end if;
 	end loop;
 end define_variables;
@@ -437,7 +444,7 @@ function get_with_quotes_if_necessary(p_string varchar2) return varchar2 is
 	v_throwaway varchar2(4000);
 	pragma exception_init(v_invalid_sql_name, -44003);
 begin
-	v_throwaway := dbms_assert.simple_sql_name(p_string);
+	v_throwaway := dbms_assert.simple_sql_name(p_string); --ignore
 	return p_string;
 exception when v_invalid_sql_name then
 	return '"' || p_string ||'"';
@@ -578,7 +585,7 @@ begin
 			v_column_metadata dbms_sql.desc_tab;
 		begin
 			--Prevent SQL injection - this will raise an exception if the name is not a real name.
-			v_unused := dbms_assert.qualified_sql_name(p_table_name);
+			v_unused := dbms_assert.qualified_sql_name(p_table_name); --ignore
 
 			--Begin parsing.
 			v_cursor := dbms_sql.open_cursor;
@@ -866,7 +873,7 @@ begin
 
 	--Start dynamic execution, retrieve data and format it.
 	define_variables(v_column_count, v_column_metadata, v_cursor);
-	v_undefined := dbms_sql.execute(v_cursor);
+	v_undefined := dbms_sql.execute(v_cursor); --ignore
 	v_rows := get_rows_from_sql(v_column_count, v_cursor, v_column_metadata, p_date_style, p_nls_date_format, p_escape_style);
 	align_values(p_alignment, v_column_count, v_rows);
 	v_column_expression := get_column_expression(v_header_columns, p_column_list, p_table_name);
@@ -880,6 +887,6 @@ begin
 	--dbms_output.put_line(v_output);
 
 	return v_output;
-end;
-end;
+end get_script;
+end inserter;
 /
