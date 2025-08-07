@@ -17,13 +17,13 @@ Click the "Download ZIP" button, extract the files, CD to the directory with tho
 
 1. Create objects and packages on the desired schema:
 
-	alter session set current_schema=&schema_name;
-	@install_inserter
+		alter session set current_schema=&schema_name;
+		@install_inserter
 
 2. Install unit tests (optional):
 
-	alter session set current_schema=&schema_name;
-	@install_inserter_unit_tests
+		alter session set current_schema=&schema_name;
+		@install_inserter_unit_tests
 
 ## How to uninstall
 
