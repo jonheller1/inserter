@@ -1,4 +1,6 @@
 create or replace package inserter_test authid current_user is
+pragma serially_reusable;
+
 /*
 == Purpose ==
 
@@ -19,6 +21,8 @@ procedure run;
 end;
 /
 create or replace package body inserter_test is
+pragma serially_reusable;
+
 
 --Global counters.
 g_test_count number := 0;
@@ -88,24 +92,44 @@ end setup;
 
 --------------------------------------------------------------------------------
 procedure test_simple is
-	v_results clob;
+	v_output clob;
+	v_result clob;
+	v_actual clob;
+	v_test_name varchar2(100);
 begin
-	--Simplest possible test of one value.
-	v_results := inserter.get_script
+	v_test_name := 'Simple Output 1';
+	v_output := inserter.get_script
 	(
-		p_table_name => 'target_table',
-		p_select => 'select 1 a from dual',
+		p_table_name => 'inserter_test_table',
+		p_select => 'select 1 a_number from dual',
 		p_header_style => inserter.header_style_off,
-		p_footer_style => inserter.footer_style_off
+		p_footer_style => inserter.footer_style_off,
+		p_commit_style => inserter.commit_style_none,
+		p_sql_terminator => null,
+		p_case_style => inserter.case_lower
 	);
-
-	assert_equals('Simple 1',
+	assert_equals(v_test_name,
 		trim_test(
 		q'[
-			insert into target_table(A)
-			select 1 from dual;
-			commit;
-		]'), v_results);
+			insert into inserter_test_table(a_number)
+			select 1 from dual
+		]'), v_output);
+
+	v_test_name := 'Simple Results 1';
+	v_output := inserter.get_script
+	(
+		p_table_name => 'inserter_test_table',
+		p_select => 'select 1 a_number from dual',
+		p_header_style => inserter.header_style_off,
+		p_footer_style => inserter.footer_style_off,
+		p_commit_style => inserter.commit_style_none,
+		p_sql_terminator => null,
+		p_case_style => inserter.case_lower
+	);
+	execute immediate v_output;
+	execute immediate 'select a_number from inserter_test_table' into v_actual;
+	assert_equals(v_test_name, '1', v_actual);
+
 end test_simple;
 
 

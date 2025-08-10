@@ -2,7 +2,6 @@ create or replace package inserter authid current_user is
 --Copyright (C) 2025 Jon Heller.  This program is licensed under the LGPLv3.
 --See https://github.com/jonheller1/inserter for examples and documentation.
 
-
 --Constants used for parameters.
 --(Created as functions because package variables cannot be referenced in SQL.)
 function DATE_STYLE_ANSI_LITERAL        return number;
@@ -69,7 +68,6 @@ end;
 create or replace package body inserter is
 --Copyright (C) 2025 Jon Heller.  This program is licensed under the LGPLv3.
 --See https://github.com/jonheller1/inserter for examples and documentation.
-
 
 --Store the results in a 2D array.
 --TODO: Use CLOB instead, but it's much slower.
@@ -450,6 +448,26 @@ exception when v_invalid_sql_name then
 	return '"' || p_string ||'"';
 end get_with_quotes_if_necessary;
 
+
+--------------------------------------------------------------------------------
+function get_with_case_style_if_not_quoted(p_string varchar2, p_case_style number) return varchar2 is
+	v_new_string varchar2(4000);
+begin
+	if p_string like '"' then
+		v_new_string := p_string;
+	else
+		if p_case_style = case_upper then
+			v_new_string := upper(p_string);
+		elsif p_case_style = case_camel then
+			v_new_string := initcap(p_string);
+		elsif p_case_style = case_lower then
+			v_new_string := lower(p_string);
+		end if;
+	end if;
+
+	return v_new_string;
+end get_with_case_style_if_not_quoted;
+
 --------------------------------------------------------------------------------
 function get_string_from_date(p_date date, p_date_style number, p_nls_date_format varchar2) return varchar2 is
 begin
@@ -568,11 +586,12 @@ function get_column_expression
 (
 	p_header_columns columns_nt,
 	p_column_list number,
-	p_table_name varchar2
+	p_table_name varchar2,
+	p_case_style number
 ) return clob is
 	v_expression clob;
 begin
-	--No column list list.
+	--No predefined column list.
 	if p_column_list = column_list_none then
 		return null;
 
@@ -593,11 +612,11 @@ begin
 			dbms_sql.describe_columns(v_cursor, v_column_count, v_column_metadata);
 
 			--Store column header information.
+			-- TODO: Change the correct case, unless double quotes are needed.
 			for i in 1 .. v_column_count loop
-				if i = 1 then
-					v_expression := v_column_metadata(i).col_name;
-				else
-					v_expression := v_expression || ', ' || v_column_metadata(i).col_name;
+				v_expression := v_expression || ', ' || get_with_case_style_if_not_quoted(get_with_quotes_if_necessary(v_column_metadata(i).col_name), p_case_style);
+				if i <> v_column_count then
+					v_expression := v_expression || ',';
 				end if;
 			end loop;
 
@@ -613,7 +632,7 @@ begin
 	else
 		--Add each column into a comma separated list.
 		for i in 1 .. p_header_columns.count loop
-			v_expression := v_expression || get_with_quotes_if_necessary(p_header_columns(i));
+			v_expression := v_expression || get_with_case_style_if_not_quoted(get_with_quotes_if_necessary(p_header_columns(i)), p_case_style);
 			if i <> p_header_columns.count then
 				v_expression := v_expression || ',';
 			end if;
@@ -876,7 +895,7 @@ begin
 	v_undefined := dbms_sql.execute(v_cursor); --ignore
 	v_rows := get_rows_from_sql(v_column_count, v_cursor, v_column_metadata, p_date_style, p_nls_date_format, p_escape_style);
 	align_values(p_alignment, v_column_count, v_rows);
-	v_column_expression := get_column_expression(v_header_columns, p_column_list, p_table_name);
+	v_column_expression := get_column_expression(v_header_columns, p_column_list, p_table_name, p_case_style);
 	v_output := get_clob_from_arrays(p_table_name, v_column_expression, v_column_count, v_rows, p_sql_terminator, p_plsql_terminator, p_insert_style, p_batch_size, p_commit_style);
 
 	--Add header and footer.
