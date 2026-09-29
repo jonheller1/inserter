@@ -8,6 +8,10 @@ function DATE_STYLE_ANSI_LITERAL        return number;
 function DATE_STYLE_TO_DATE             return number;
 function DATE_STYLE_ALTER_SESSION       return number;
 
+function TIMESTAMP_STYLE_ANSI_LITERAL   return number;
+function TIMESTAMP_STYLE_TO_TIMESTAMP   return number;
+function TIMESTAMP_STYLE_ALTER_SESSION  return number;
+
 function ALIGNMENT_UNALIGNED            return number;
 function ALIGNMENT_ALIGNED              return number;
 
@@ -60,7 +64,10 @@ function get_script
 	p_batch_size          number default 100,
 	p_commit_style        number default commit_style_at_end,
 	p_escape_style        number default escape_style_two_quotes,
-	p_column_list         number default column_list_derived_from_sql
+	p_column_list         number default column_list_derived_from_sql,
+	p_timestamp_style     number default timestamp_style_ansi_literal,
+	p_nls_timestamp_format varchar2 default null
+
 ) return clob;
 
 end;
@@ -86,6 +93,7 @@ g_union_all           varchar2(100) := 'union all';
 g_timestamp           varchar2(100) := 'timestamp';
 g_date                varchar2(100) := 'date';
 g_to_date             varchar2(100) := 'to_date';
+g_to_timestamp        varchar2(100) := 'to_timestamp';
 g_begin               varchar2(100) := 'begin';
 g_end                 varchar2(100) := 'end';
 --TODO: Parameterize this?
@@ -115,6 +123,10 @@ c_end_delimiters constant sys.odcivarchar2list := sys.odcivarchar2list(
 function DATE_STYLE_ANSI_LITERAL        return number is begin return 1; end;
 function DATE_STYLE_TO_DATE             return number is begin return 2; end;
 function DATE_STYLE_ALTER_SESSION       return number is begin return 3; end;
+
+function TIMESTAMP_STYLE_ANSI_LITERAL   return number is begin return 3.1; end;
+function TIMESTAMP_STYLE_TO_TIMESTAMP   return number is begin return 3.2; end;
+function TIMESTAMP_STYLE_ALTER_SESSION  return number is begin return 3.3; end;
 
 function ALIGNMENT_UNALIGNED            return number is begin return 5; end;
 function ALIGNMENT_ALIGNED              return number is begin return 4; end;
@@ -148,13 +160,14 @@ function COLUMN_LIST_DERIVED_FROM_TABLE return number is begin return 26; end;
 function COLUMN_LIST_NONE               return number is begin return 27; end;
 
 --------------------------------------------------------------------------------------------------------------------------
-procedure verify_parameters(p_date_style number, p_nls_date_format varchar2, p_alignment number, p_case_style number,
+procedure verify_parameters(p_date_style number, p_nls_date_format varchar2, p_timestamp_style number, p_nls_timestamp_format varchar2,
+	p_alignment number, p_case_style number,
 	p_header_style number, p_header_custom_value varchar2, p_footer_style varchar2, p_footer_custom_value varchar2,
 	p_insert_style number, p_batch_size number, p_commit_style number, p_escape_style number, p_column_list number
 ) is
 	v_throwaway varchar2(32767);
 begin
-	--Check that P_DATE_STYLE is correct.
+	--Check P_DATE_STYLE is correct.
 	if p_date_style in (inserter.date_style_ansi_literal, inserter.date_style_to_date, inserter.date_style_alter_session) then
 		null;
 	else
@@ -178,6 +191,40 @@ begin
 		raise_application_error(-20000, 'The value you entered for P_NLS_DATE_FORMAT is not valid. It raised this exception: '||chr(10)||
 			sqlerrm);
 	end;
+
+
+
+
+
+	--Check P_TIMESTAMP_STYLE is correct.
+	if p_timestamp_style in (inserter.timestamp_style_ansi_literal, inserter.timestamp_style_to_timestamp, inserter.timestamp_style_alter_session) then
+		null;
+	else
+		raise_application_error(-20000, 'p_timestamp_style must be one of TIMESTAMP_STYLE_ANSI_LITERAL, TIMESTAMP_STYLE_TO_TIMESTAMP, or TIMESTAMP_STYLE_ALTER_SESSION.');
+	end if;
+
+	--Check that P_TIMESTAMP_STYLE and P_NLS_TIMESTAMP_FORMAT are set correctly together.
+	if p_timestamp_style = inserter.timestamp_style_ansi_literal and p_nls_timestamp_format is not null then
+		raise_application_error(-20000, 'If P_TIMESTAMP_STYLE is set to TIMESTAMP_STYLE_ANSI_LITERAL then P_NLS_TIMESTAMP_FORMAT should be null.');
+	end if;
+
+	--Check that P_TIMESTAMP_STYLE and P_NLS_TIMESTAMP_FORMAT are set correctly together.
+	if p_timestamp_style in (inserter.timestamp_style_to_timestamp, inserter.timestamp_style_alter_session) and p_nls_timestamp_format is null then
+		raise_application_error(-20000, 'If P_TIMESTAMP_STYLE is set to TIMESTAMP_STYLE_TO_TIMESTAMP or TIMESTAMP_STYLE_ALTER_SESSION, then P_NLS_TIMESTAMP_FORMAT cannot be null.');
+	end if;
+
+	--Check the P_NLS_TIMESTAMP_FORMAT if it was set.
+	begin
+		v_throwaway := to_char(systimestamp, p_nls_timestamp_format); --ignore
+	exception when others then
+		raise_application_error(-20000, 'The value you entered for P_NLS_TIMESTAMP_FORMAT is not valid. It raised this exception: '||chr(10)||
+			sqlerrm);
+	end;
+
+
+
+
+
 
 	--Check P_ALIGNMENT.
 	if p_alignment in (alignment_aligned, alignment_unaligned) then
@@ -265,33 +312,35 @@ procedure set_keyword_case(p_case_style number) is
 begin
 	--Lower is the default, set upper and camel case if necessary.
 	if p_case_style = case_upper then
-		g_insert_into := upper(g_insert_into);
-		g_insert_all  := upper(g_insert_all);
-		g_into        := upper(g_into);
-		g_values      := upper(g_values);
-		g_select      := upper(g_select);
-		g_null        := upper(g_null);
-		g_from_dual   := upper(g_from_dual);
-		g_union_all   := upper(g_union_all);
-		g_timestamp   := upper(g_timestamp);
-		g_date        := upper(g_date);
-		g_to_date     := upper(g_to_date);
-		g_begin       := upper(g_begin);
-		g_end         := upper(g_end);
+		g_insert_into  := upper(g_insert_into);
+		g_insert_all   := upper(g_insert_all);
+		g_into         := upper(g_into);
+		g_values       := upper(g_values);
+		g_select       := upper(g_select);
+		g_null         := upper(g_null);
+		g_from_dual    := upper(g_from_dual);
+		g_union_all    := upper(g_union_all);
+		g_timestamp    := upper(g_timestamp);
+		g_date         := upper(g_date);
+		g_to_date      := upper(g_to_date);
+		g_to_timestamp := upper(g_to_timestamp);
+		g_begin        := upper(g_begin);
+		g_end          := upper(g_end);
 	elsif p_case_style = case_camel then
-		g_insert_into := initcap(g_insert_into);
-		g_insert_all  := initcap(g_insert_all);
-		g_into        := initcap(g_into);
-		g_values      := initcap(g_values);
-		g_select      := initcap(g_select);
-		g_null        := initcap(g_null);
-		g_from_dual   := initcap(g_from_dual);
-		g_union_all   := initcap(g_union_all);
-		g_timestamp   := initcap(g_timestamp);
-		g_date        := initcap(g_date);
-		g_to_date     := initcap(g_to_date);
-		g_begin       := initcap(g_begin);
-		g_end         := initcap(g_end);
+		g_insert_into  := initcap(g_insert_into);
+		g_insert_all   := initcap(g_insert_all);
+		g_into         := initcap(g_into);
+		g_values       := initcap(g_values);
+		g_select       := initcap(g_select);
+		g_null         := initcap(g_null);
+		g_from_dual    := initcap(g_from_dual);
+		g_union_all    := initcap(g_union_all);
+		g_timestamp    := initcap(g_timestamp);
+		g_date         := initcap(g_date);
+		g_to_date      := initcap(g_to_date);
+		g_to_timestamp := initcap(g_to_timestamp);
+		g_begin        := initcap(g_begin);
+		g_end          := initcap(g_end);
 	end if;
 end set_keyword_case;
 
@@ -302,6 +351,7 @@ procedure define_variables(p_column_count number, p_column_metadata dbms_sql.des
 	v_number number;
 	v_varchar2 varchar2(32767);
 	v_nvarchar2 nvarchar2(32767);
+	v_timestamp timestamp;
 begin
 	--Define variables.
 	for i in 1 .. p_column_count loop
@@ -313,6 +363,8 @@ begin
 			dbms_sql.define_column(p_cursor, i, v_varchar2, 32767);
 		elsif p_column_metadata(i).col_type in (dbms_types.typecode_nchar, dbms_types.typecode_nvarchar2) then
 			dbms_sql.define_column(p_cursor, i, v_nvarchar2, 32767);
+		elsif p_column_metadata(i).col_type = 180 /*dbms_types.typecode_timestamp*/ then
+			dbms_sql.define_column(p_cursor, i, v_timestamp);
 		--TODO: Add more types here.
 		end if;
 	end loop;
@@ -354,6 +406,8 @@ procedure add_header
 	p_rowcount number,
 	p_date_style number,
 	p_nls_date_format varchar2,
+	p_timestamp_style number,
+	p_nls_timestamp_format varchar2,
 	p_header_style varchar2,
 	p_header_custom_value varchar2
 ) is
@@ -387,6 +441,10 @@ begin
 	--Alter the session, if requested.
 	if p_date_style = inserter.date_style_alter_session then
 		v_header := v_header || 'alter session set nls_date_format = '''||p_nls_date_format||''';' || chr(10);
+	end if;
+
+	if p_timestamp_style = inserter.timestamp_style_alter_session then
+		v_header := v_header || 'alter session set nls_timestamp_format = '''||p_nls_timestamp_format||''';' || chr(10);
 	end if;
 
 	--TODO: There's gotta be a better way to do this.
@@ -442,7 +500,7 @@ function get_with_quotes_if_necessary(p_string varchar2) return varchar2 is
 	v_throwaway varchar2(4000);
 	pragma exception_init(v_invalid_sql_name, -44003);
 begin
-	v_throwaway := dbms_assert.simple_sql_name(p_string); --ignore
+	v_throwaway := dbms_assert.simple_sql_name(p_string); --Ignore compiler warning.
 	return p_string;
 exception when v_invalid_sql_name then
 	return '"' || p_string ||'"';
@@ -489,6 +547,33 @@ begin
 		end if;
 	end if;
 end get_string_from_date;
+
+--------------------------------------------------------------------------------
+function get_string_from_timestamp(p_timestamp timestamp, p_timestamp_style number, p_nls_timestamp_format varchar2) return varchar2 is
+begin
+	if p_timestamp is null then
+		return g_null;
+	else
+		if p_timestamp_style = TIMESTAMP_STYLE_ANSI_LITERAL then
+			-- TODO: Shrink trailing zeroes?
+			--Use DATE literal if there is no time, to save space.
+			/*
+			if p_timestamp = trunc(p_timestamp) then
+				return g_date || ' ''' || to_char(p_timestamp, 'YYYY-MM-DD') || '''';
+			--Use TIMESTAMP literal if necessary.
+			else
+				return g_timestamp || ' ''' || to_char(p_timestamp, 'YYYY-MM-DD HH24:MI:SS') || '''';
+			end if;
+			*/
+			return g_timestamp || ' ''' || to_char(p_timestamp, 'YYYY-MM-DD HH24:MI:SS.FF9') || '''';
+
+		elsif p_timestamp_style = timestamp_style_to_timestamp then
+			return g_to_timestamp || '(''' || to_char(p_timestamp, p_nls_timestamp_format) || ''', ''' || p_nls_timestamp_format || ''')';
+		elsif p_timestamp_style = timestamp_style_alter_session then
+			return '''' || to_char(p_timestamp, p_nls_timestamp_format) || '''';
+		end if;
+	end if;
+end get_string_from_timestamp;
 
 --------------------------------------------------------------------------------
 function get_string_from_number(p_number number) return varchar2 is
@@ -656,7 +741,9 @@ function get_rows_from_sql
 	v_column_metadata dbms_sql.desc_tab4,
 	p_date_style number,
 	p_nls_date_format varchar2,
-	p_escape_style number
+	p_timestamp_style number,
+	p_nls_timestamp_format varchar2,
+	p_escape_style number	
 ) return rows_nt is
 	v_rows rows_nt := rows_nt();
 	v_row_count number;
@@ -669,7 +756,7 @@ function get_rows_from_sql
 	v_number    number;
 	v_varchar2  varchar2(32767);
 	v_nvarchar2 nvarchar2(32767);
-
+	v_timestamp timestamp;
 begin
 	loop
 		v_row_count := dbms_sql.fetch_rows(v_cursor);
@@ -684,7 +771,6 @@ begin
 			if v_column_metadata(i).col_type = dbms_types.typecode_date then
 				dbms_sql.column_value(v_cursor, i, v_date);
 				v_columns(i) := get_string_from_date(v_date, p_date_style, p_nls_date_format);
-
 			elsif v_column_metadata(i).col_type = dbms_types.typecode_number then
 				dbms_sql.column_value(v_cursor, i, v_number);
 				v_columns(i) := get_string_from_number(v_number);
@@ -694,8 +780,13 @@ begin
 			elsif v_column_metadata(i).col_type in (dbms_types.typecode_nchar, dbms_types.typecode_nvarchar2) then
 				dbms_sql.column_value(v_cursor, i, v_nvarchar2);
 				v_columns(i) := get_string_from_nvarchar2(v_nvarchar2, p_escape_style);
+			-- Note that DBMS_TYPES is not always accurate.
+			elsif v_column_metadata(i).col_type = 180 /*dbms_types.typecode_timestamp*/ then
+				dbms_output.put_line('test: ' || i);
+				dbms_sql.column_value(v_cursor, i, v_timestamp);
+				v_columns(i) := get_string_from_timestamp(v_timestamp, p_timestamp_style, p_nls_timestamp_format);
 			else
-				raise_application_error(-20000, 'Unexpected type - not yet implemented.');
+				raise_application_error(-20000, 'Unexpected type: ' || v_column_metadata(i).col_type || ' not yet implemented.');
 			end if;
 		end loop;
 
@@ -842,23 +933,25 @@ end get_clob_from_arrays;
 --------------------------------------------------------------------------------
 function get_script
 (
-	p_table_name          varchar2,
-	p_select              clob,
-	p_date_style          number   default date_style_ansi_literal,
-	p_nls_date_format     varchar2 default null,
-	p_alignment           number   default alignment_unaligned,
-	p_case_style          number   default case_lower,
-	p_header_style        number   default header_style_on,
-	p_header_custom_value varchar2 default null,
-	p_footer_style        number   default footer_style_on,
-	p_footer_custom_value varchar2 default null,
-	p_sql_terminator      varchar2 default ';',
-	p_plsql_terminator    varchar2 default chr(10)||'/',
-	p_insert_style        number default insert_style_union_all,
-	p_batch_size          number default 100,
-	p_commit_style        number default commit_style_at_end,
-	p_escape_style        number default escape_style_two_quotes,
-	p_column_list         number default column_list_derived_from_sql
+	p_table_name           varchar2,
+	p_select               clob,
+	p_date_style           number   default date_style_ansi_literal,
+	p_nls_date_format      varchar2 default null,
+	p_alignment            number   default alignment_unaligned,
+	p_case_style           number   default case_lower,
+	p_header_style         number   default header_style_on,
+	p_header_custom_value  varchar2 default null,
+	p_footer_style         number   default footer_style_on,
+	p_footer_custom_value  varchar2 default null,
+	p_sql_terminator       varchar2 default ';',
+	p_plsql_terminator     varchar2 default chr(10)||'/',
+	p_insert_style         number   default insert_style_union_all,
+	p_batch_size           number   default 100,
+	p_commit_style         number   default commit_style_at_end,
+	p_escape_style         number   default escape_style_two_quotes,
+	p_column_list          number   default column_list_derived_from_sql,
+	p_timestamp_style      number   default timestamp_style_ansi_literal,
+	p_nls_timestamp_format varchar2 default null
 ) return clob is
 	v_cursor number;
 	v_column_count number;
@@ -874,7 +967,7 @@ function get_script
 	v_rows rows_nt := rows_nt();
 begin
 	--Verify parameters and set some globals.
-	verify_parameters(p_date_style, p_nls_date_format, p_alignment, p_case_style,
+	verify_parameters(p_date_style, p_nls_date_format, p_timestamp_style, p_nls_timestamp_format, p_alignment, p_case_style,
 		p_header_style, p_header_custom_value, p_footer_style, p_footer_custom_value,
 		p_insert_style, p_batch_size, p_commit_style, p_escape_style, p_column_list);
 	set_keyword_case(p_case_style);
@@ -893,13 +986,13 @@ begin
 	--Start dynamic execution, retrieve data and format it.
 	define_variables(v_column_count, v_column_metadata, v_cursor);
 	v_undefined := dbms_sql.execute(v_cursor); --ignore
-	v_rows := get_rows_from_sql(v_column_count, v_cursor, v_column_metadata, p_date_style, p_nls_date_format, p_escape_style);
+	v_rows := get_rows_from_sql(v_column_count, v_cursor, v_column_metadata, p_date_style, p_nls_date_format, p_timestamp_style, p_nls_timestamp_format, p_escape_style);
 	align_values(p_alignment, v_column_count, v_rows);
 	v_column_expression := get_column_expression(v_header_columns, p_column_list, p_table_name, p_case_style);
 	v_output := get_clob_from_arrays(p_table_name, v_column_expression, v_column_count, v_rows, p_sql_terminator, p_plsql_terminator, p_insert_style, p_batch_size, p_commit_style);
 
 	--Add header and footer.
-	add_header(v_output, p_table_name, v_rows.count, p_date_style, p_nls_date_format, p_header_style, p_header_custom_value);
+	add_header(v_output, p_table_name, v_rows.count, p_date_style, p_nls_date_format, p_timestamp_style, p_nls_timestamp_format, p_header_style, p_header_custom_value);
 	add_footer(v_output, p_table_name, v_rows.count, p_footer_style, p_footer_custom_value);
 
 	dbms_sql.close_cursor(v_cursor);

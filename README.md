@@ -80,4 +80,4 @@ Optional Parameters:
 
 
 ## License
-`plsql_lexer` is licensed under the LGPL.
+`inserter` is licensed under the LGPL.
