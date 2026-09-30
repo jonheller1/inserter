@@ -363,7 +363,8 @@ begin
 			dbms_sql.define_column(p_cursor, i, v_varchar2, 32767);
 		elsif p_column_metadata(i).col_type in (dbms_types.typecode_nchar, dbms_types.typecode_nvarchar2) then
 			dbms_sql.define_column(p_cursor, i, v_nvarchar2, 32767);
-		elsif p_column_metadata(i).col_type = 180 /*dbms_types.typecode_timestamp*/ then
+		-- Timestamp and SYSTIMESTAMP can be different. Note that DBMS_TYPES is not always accurate.
+		elsif p_column_metadata(i).col_type in (180, 181) then
 			dbms_sql.define_column(p_cursor, i, v_timestamp);
 		--TODO: Add more types here.
 		end if;
@@ -780,8 +781,8 @@ begin
 			elsif v_column_metadata(i).col_type in (dbms_types.typecode_nchar, dbms_types.typecode_nvarchar2) then
 				dbms_sql.column_value(v_cursor, i, v_nvarchar2);
 				v_columns(i) := get_string_from_nvarchar2(v_nvarchar2, p_escape_style);
-			-- Note that DBMS_TYPES is not always accurate.
-			elsif v_column_metadata(i).col_type = 180 /*dbms_types.typecode_timestamp*/ then
+			-- Timestamp and SYSTIMESTAMP can be different. Note that DBMS_TYPES is not always accurate.
+			elsif v_column_metadata(i).col_type in (180, 181) then
 				dbms_output.put_line('test: ' || i);
 				dbms_sql.column_value(v_cursor, i, v_timestamp);
 				v_columns(i) := get_string_from_timestamp(v_timestamp, p_timestamp_style, p_nls_timestamp_format);
