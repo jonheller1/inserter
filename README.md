@@ -43,40 +43,43 @@ Required Parameters:
 
 Optional Parameters:
 
-* **P_DATE_STYLE** - Either DATE_STYLE_ANSI_LITERAL (default), DATE_STYLE_TO_DATE, or DATE_STYLE_ALTER_SESSION.
+* **P_DATE_STYLE** - Either *DATE_STYLE_ANSI_LITERAL* (default), *DATE_STYLE_TO_DATE*, or *DATE_STYLE_ALTER_SESSION*.
 * **P_NLS_DATE_FORMAT** - A valid date format string. Only valid if P_DATE_STYLE is TO_DATE or ALTER_SESSION.
-* **P_ALIGNMENT** - Either ALIGNMENT_UNALIGNED (default) or ALIGNMENT_ALIGNED.
-* **P_CASE_STYLE** - Either CASE_LOWER (default), CASE_UPPER, or CASE_CAMEL.
-* **P_HEADER_STYLE** - Either HEADER_STYLE_ON (default), HEADER_STYLE_OFF, or HEADER_STYLE_CUSTOM.
-* **P_HEADER_CUSTOM_VALUE** - If HEADER_STYLE_CUSTOM is set, replace the default header with your custom string. The value can use one of these macros: #ROWCOUNT#, #ROW_OR_ROWS#, #USER#, #DATE#, #TABLE#, #SET_DEFINE_OFF#.
-* **P_FOOTER_STYLE** - Either HEADER_STYLE_ON (default), HEADER_STYLE_OFF, or HEADER_STYLE_CUSTOM.
-* **P_FOOTER_CUSTOM_VALUE** - If FOOTER_STYLE_CUSTOM is set, replace the default header with your custom string. The value can use one of these macros: #ROWCOUNT#, #ROW_OR_ROWS#, #USER#, #DATE#, #TABLE#.
+* **P_ALIGNMENT** - Either *ALIGNMENT_UNALIGNED* (default) or *ALIGNMENT_ALIGNED*.
+* **P_CASE_STYLE** - Either *CASE_LOWER* (default), *CASE_UPPER*, or *CASE_CAMEL*.
+* **P_HEADER_STYLE** - Either *HEADER_STYLE_ON* (default), *HEADER_STYLE_OFF*, or *HEADER_STYLE_CUSTOM*.
+* **P_HEADER_CUSTOM_VALUE** - If *HEADER_STYLE_CUSTOM* is set, replace the default header with your custom string. The value can use one of these macros: #ROWCOUNT#, #ROW_OR_ROWS#, #USER#, #DATE#, #TABLE#, #SET_DEFINE_OFF#.
+* **P_FOOTER_STYLE** - Either *FOOTER_STYLE_ON* (default), *FOOTER_STYLE_OFF*, or *FOOTER_STYLE_CUSTOM*.
+* **P_FOOTER_CUSTOM_VALUE** - If *FOOTER_STYLE_CUSTOM* is set, replace the default footer with your custom string. The value can use one of these macros: #ROWCOUNT#, #ROW_OR_ROWS#, #USER#, #DATE#, #TABLE#.
 * **P_SQL_TERMINATOR** - Character at the end of each SQL statement - ';' by default.
 * **P_PLSQL_TERMINATOR** - Character at the end of each PL/SQL block - chr(10)||'/' by default.
 * **P_INSERT_STYLE** - Either:
+	* *INSERT_STYLE_UNION_ALL* (default) - Usually the cleanest, fastest way to batch inserts.
 
-		INSERT_STYLE_UNION_ALL (default) - Usually the cleanest, fastest way to batch inserts.
 			insert into t1(c1)
 			select 1 from dual union all
 			select 2 from dual;
-		INSERT_STYLE_INSERT_ALL - Another batching method but wordier and slower than the UNION ALL approach.
+	* *INSERT_STYLE_INSERT_ALL* - Another batching method but wordier and slower than the UNION ALL approach.
+
 			insert all
 				into t1(c1) values(1)
 				into t1(c1) values(2)
 			select * from dual;
-		INSERT_STYLE_VALUES - The simplest, slowest approach.
+	* *INSERT_STYLE_VALUES* - The simplest, slowest approach.
+
 			insert into t1(c1) values (1);
 			insert into t1(c1) values (2);
-		INSERT_STYLE_VALUES_PLSQLBLOCK - Not as fast as other batching method, but a good compromise if you want simple inserts.
+	* *INSERT_STYLE_VALUES_PLSQLBLOCK* - Not as fast as other batching method, but a good compromise if you want simple inserts.
+
 			begin
 				insert into t1(c1) values (1);
 				insert into t1(c1) values (2);
 			end;
 			/
-* **P_BATCH_SIZE** - The number of rows included in one batch (default 100). Different sizes run into parsing and compiling problems as the size increases and the Oracle version decreases. In general, I recommend not exceeding 1000.
-* **P_COMMIT_STYLE** - Either COMMIT_STYLE_AT_END (default), COMMIT_STYLE_NONE, or COMMIT_STYLE_PER_BATCH
-* **P_ESCAPE_STYLE** - Either ESCAPE_STYLE_TWO_QUOTES (default) or ESCAPE_STYLE_Q_QUOTES (q'[...]' style)
-* **P_COLUMN_LIST** - Either COLUMN_LIST_DERIVED_FROM_SQL (default), COLUMN_LIST_DERIVED_FROM_TABLE, or COLUMN_LIST_NONE.
+* **P_BATCH_SIZE** - The number of rows included in one batch (default 100). You probably don't want to go higher than 100, or you risk running into [parsing performance issues](https://stackoverflow.com/a/11663076/409172) for [no significant benefit](https://stackoverflow.com/a/38664103/409172).
+* **P_COMMIT_STYLE** - Either *COMMIT_STYLE_AT_END* (default), *COMMIT_STYLE_NONE*, or *COMMIT_STYLE_PER_BATCH*.
+* **P_ESCAPE_STYLE** - Either *ESCAPE_STYLE_TWO_QUOTES* (default) or *ESCAPE_STYLE_Q_QUOTES* (q'[...]' style).
+* **P_COLUMN_LIST** - Either *COLUMN_LIST_DERIVED_FROM_SQL* (default), *COLUMN_LIST_DERIVED_FROM_TABLE*, or *COLUMN_LIST_NONE*.
 
 
 ## License
