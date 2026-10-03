@@ -31,6 +31,7 @@ function INSERT_STYLE_UNION_ALL         return number;
 function INSERT_STYLE_INSERT_ALL        return number;
 function INSERT_STYLE_VALUES            return number;
 function INSERT_STYLE_VALUES_PLSQLBLOCK return number;
+function INSERT_STYLE_SELECT_ONLY       return number;
 --function INSERT_STYLE_TABLE_VALUES      return number; -- TODO - New 23ai style.
 
 function COMMIT_STYLE_AT_END            return number;
@@ -45,30 +46,58 @@ function COLUMN_LIST_DERIVED_FROM_TABLE return number;
 function COLUMN_LIST_NONE               return number;
 
 
---Main function
+-- Main function
 function get_script
 (
-	p_table_name          varchar2,
-	p_select              clob,
-	p_date_style          number   default date_style_ansi_literal,
-	p_nls_date_format     varchar2 default null,
-	p_alignment           number   default alignment_unaligned,
-	p_case_style          number   default case_lower,
-	p_header_style        number   default header_style_on,
-	p_header_custom_value varchar2 default null,
-	p_footer_style        number   default footer_style_on,
-	p_footer_custom_value varchar2 default null,
-	p_sql_terminator      varchar2 default ';',
-	p_plsql_terminator    varchar2 default chr(10)||'/',
-	p_insert_style        number default insert_style_union_all,
-	p_batch_size          number default 100,
-	p_commit_style        number default commit_style_at_end,
-	p_escape_style        number default escape_style_two_quotes,
-	p_column_list         number default column_list_derived_from_sql,
-	p_timestamp_style     number default timestamp_style_ansi_literal,
-	p_nls_timestamp_format varchar2 default null
-
+	p_table_name           varchar2,
+	p_select               clob,
+	p_date_style           number    default date_style_ansi_literal,
+	p_nls_date_format      varchar2  default null,
+	p_alignment            number    default alignment_unaligned,
+	p_case_style           number    default case_lower,
+	p_header_style         number    default header_style_on,
+	p_header_custom_value  varchar2  default null,
+	p_footer_style         number    default footer_style_on,
+	p_footer_custom_value  varchar2  default null,
+	p_sql_terminator       varchar2  default ';',
+	p_plsql_terminator     varchar2  default chr(10)||'/',
+	p_insert_style         number    default insert_style_union_all,
+	p_batch_size           number    default 100,
+	p_commit_style         number    default commit_style_at_end,
+	p_escape_style         number    default escape_style_two_quotes,
+	p_column_list          number    default column_list_derived_from_sql,
+	p_timestamp_style      number    default timestamp_style_ansi_literal,
+	p_nls_timestamp_format varchar2  default null
 ) return clob;
+
+
+-- Alternative main function that allows passing in all the parameters as a record.
+-- This interface is useful if the package is called repeatedly with similar parameters.
+type options_rec is record
+(
+	p_table_name           varchar2(4000),
+	p_select               clob,
+	p_date_style           number         default date_style_ansi_literal,
+	p_nls_date_format      varchar2(4000) default null,
+	p_alignment            number         default alignment_unaligned,
+	p_case_style           number         default case_lower,
+	p_header_style         number         default header_style_on,
+	p_header_custom_value  varchar2(4000) default null,
+	p_footer_style         number         default footer_style_on,
+	p_footer_custom_value  varchar2(4000) default null,
+	p_sql_terminator       varchar2(4000) default ';',
+	p_plsql_terminator     varchar2(4000) default chr(10)||'/',
+	p_insert_style         number         default insert_style_union_all,
+	p_batch_size           number         default 100,
+	p_commit_style         number         default commit_style_at_end,
+	p_escape_style         number         default escape_style_two_quotes,
+	p_column_list          number         default column_list_derived_from_sql,
+	p_timestamp_style      number         default timestamp_style_ansi_literal,
+	p_nls_timestamp_format varchar2(4000) default null
+);
+
+function get_script(p_options options_rec) return clob;
+
 
 end;
 /
@@ -147,6 +176,7 @@ function INSERT_STYLE_UNION_ALL         return number is begin return 15; end;
 function INSERT_STYLE_INSERT_ALL        return number is begin return 16; end;
 function INSERT_STYLE_VALUES            return number is begin return 17; end;
 function INSERT_STYLE_VALUES_PLSQLBLOCK return number is begin return 18; end;
+function INSERT_STYLE_SELECT_ONLY       return number is begin return 19; end;
 
 function COMMIT_STYLE_AT_END            return number is begin return 20; end;
 function COMMIT_STYLE_NONE              return number is begin return 21; end;
@@ -192,10 +222,6 @@ begin
 			sqlerrm);
 	end;
 
-
-
-
-
 	--Check P_TIMESTAMP_STYLE is correct.
 	if p_timestamp_style in (inserter.timestamp_style_ansi_literal, inserter.timestamp_style_to_timestamp, inserter.timestamp_style_alter_session) then
 		null;
@@ -220,11 +246,6 @@ begin
 		raise_application_error(-20000, 'The value you entered for P_NLS_TIMESTAMP_FORMAT is not valid. It raised this exception: '||chr(10)||
 			sqlerrm);
 	end;
-
-
-
-
-
 
 	--Check P_ALIGNMENT.
 	if p_alignment in (alignment_aligned, alignment_unaligned) then
@@ -270,10 +291,10 @@ begin
 		raise_application_error(-20000, 'If P_FOOTER_STYLE is set to FOOTER_STYLE_CUSTOM, then P_FOOTER_CUSTOM_VALUE should be non-null.');
 	end if;
 
-	if p_insert_style in (insert_style_union_all, insert_style_insert_all, insert_style_values, insert_style_values_plsqlblock) then
+	if p_insert_style in (insert_style_union_all, insert_style_insert_all, insert_style_values, insert_style_values_plsqlblock, insert_style_select_only) then
 		null;
 	else
-		raise_application_error(-20000, 'P_INSERT_STYLE must be set to either INSERT_STYLE_UNION_ALL, INSERT_STYLE_INSERT_ALL, INSERT_STYLE_VALUES, or INSERT_STYLE_VALUES_PLSQLBLOCK.');
+		raise_application_error(-20000, 'P_INSERT_STYLE must be set to either INSERT_STYLE_UNION_ALL, INSERT_STYLE_INSERT_ALL, INSERT_STYLE_VALUES, INSERT_STYLE_VALUES_PLSQLBLOCK, or INSERT_STYLE_SELECT_ONLY.');
 	end if;
 
 	--Check P_BATCH_SIZE.
@@ -351,7 +372,7 @@ procedure define_variables(p_column_count number, p_column_metadata dbms_sql.des
 	v_number number;
 	v_varchar2 varchar2(32767);
 	v_nvarchar2 nvarchar2(32767);
-	v_timestamp timestamp;
+	v_timestamp timestamp_unconstrained;
 begin
 	--Define variables.
 	for i in 1 .. p_column_count loop
@@ -550,7 +571,7 @@ begin
 end get_string_from_date;
 
 --------------------------------------------------------------------------------
-function get_string_from_timestamp(p_timestamp timestamp, p_timestamp_style number, p_nls_timestamp_format varchar2) return varchar2 is
+function get_string_from_timestamp(p_timestamp timestamp_unconstrained, p_timestamp_style number, p_nls_timestamp_format varchar2) return varchar2 is
 begin
 	if p_timestamp is null then
 		return g_null;
@@ -757,7 +778,7 @@ function get_rows_from_sql
 	v_number    number;
 	v_varchar2  varchar2(32767);
 	v_nvarchar2 nvarchar2(32767);
-	v_timestamp timestamp;
+	v_timestamp timestamp_unconstrained;
 begin
 	loop
 		v_row_count := dbms_sql.fetch_rows(v_cursor);
@@ -783,7 +804,6 @@ begin
 				v_columns(i) := get_string_from_nvarchar2(v_nvarchar2, p_escape_style);
 			-- Timestamp and SYSTIMESTAMP can be different. Note that DBMS_TYPES is not always accurate.
 			elsif v_column_metadata(i).col_type in (180, 181) then
-				dbms_output.put_line('test: ' || i);
 				dbms_sql.column_value(v_cursor, i, v_timestamp);
 				v_columns(i) := get_string_from_timestamp(v_timestamp, p_timestamp_style, p_nls_timestamp_format);
 			else
@@ -936,23 +956,23 @@ function get_script
 (
 	p_table_name           varchar2,
 	p_select               clob,
-	p_date_style           number   default date_style_ansi_literal,
-	p_nls_date_format      varchar2 default null,
-	p_alignment            number   default alignment_unaligned,
-	p_case_style           number   default case_lower,
-	p_header_style         number   default header_style_on,
-	p_header_custom_value  varchar2 default null,
-	p_footer_style         number   default footer_style_on,
-	p_footer_custom_value  varchar2 default null,
-	p_sql_terminator       varchar2 default ';',
-	p_plsql_terminator     varchar2 default chr(10)||'/',
-	p_insert_style         number   default insert_style_union_all,
-	p_batch_size           number   default 100,
-	p_commit_style         number   default commit_style_at_end,
-	p_escape_style         number   default escape_style_two_quotes,
-	p_column_list          number   default column_list_derived_from_sql,
-	p_timestamp_style      number   default timestamp_style_ansi_literal,
-	p_nls_timestamp_format varchar2 default null
+	p_date_style           number    default date_style_ansi_literal,
+	p_nls_date_format      varchar2  default null,
+	p_alignment            number    default alignment_unaligned,
+	p_case_style           number    default case_lower,
+	p_header_style         number    default header_style_on,
+	p_header_custom_value  varchar2  default null,
+	p_footer_style         number    default footer_style_on,
+	p_footer_custom_value  varchar2  default null,
+	p_sql_terminator       varchar2  default ';',
+	p_plsql_terminator     varchar2  default chr(10)||'/',
+	p_insert_style         number    default insert_style_union_all,
+	p_batch_size           number    default 100,
+	p_commit_style         number    default commit_style_at_end,
+	p_escape_style         number    default escape_style_two_quotes,
+	p_column_list          number    default column_list_derived_from_sql,
+	p_timestamp_style      number    default timestamp_style_ansi_literal,
+	p_nls_timestamp_format varchar2  default null
 ) return clob is
 	v_cursor number;
 	v_column_count number;
@@ -1001,5 +1021,34 @@ begin
 
 	return v_output;
 end get_script;
+
+
+--------------------------------------------------------------------------------
+function get_script(p_options options_rec) return clob is
+begin
+	return get_script
+	(
+		p_table_name           => p_options.p_table_name          ,
+		p_select               => p_options.p_select              ,
+		p_date_style           => p_options.p_date_style          ,
+		p_nls_date_format      => p_options.p_nls_date_format     ,
+		p_alignment            => p_options.p_alignment           ,
+		p_case_style           => p_options.p_case_style          ,
+		p_header_style         => p_options.p_header_style        ,
+		p_header_custom_value  => p_options.p_header_custom_value ,
+		p_footer_style         => p_options.p_footer_style        ,
+		p_footer_custom_value  => p_options.p_footer_custom_value ,
+		p_sql_terminator       => p_options.p_sql_terminator      ,
+		p_plsql_terminator     => p_options.p_plsql_terminator    ,
+		p_insert_style         => p_options.p_insert_style        ,
+		p_batch_size           => p_options.p_batch_size          ,
+		p_commit_style         => p_options.p_commit_style        ,
+		p_escape_style         => p_options.p_escape_style        ,
+		p_column_list          => p_options.p_column_list         ,
+		p_timestamp_style      => p_options.p_timestamp_style     ,
+		p_nls_timestamp_format => p_options.p_nls_timestamp_format
+	);
+end get_script;
+
 end inserter;
 /

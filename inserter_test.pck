@@ -41,28 +41,45 @@ begin
 	else
 		g_failed_count := g_failed_count + 1;
 		dbms_output.put_line('Failure with: '||p_test);
-		dbms_output.put_line('Expected: '||p_expected);
-		dbms_output.put_line('Actual  : '||p_actual);
+		dbms_output.put_line('Expected: '||chr(10)||'"'||p_expected||'"');
+		dbms_output.put_line('Actual  : '||chr(10)||'"'||p_actual||'"');
 	end if;
 end assert_equals;
 
 
 --------------------------------------------------------------------------------
--- Trim text for testing. For readability, results are displayed in a string with
--- an extra newline at the beginning, three tabs on each line, and a newline with
--- two extra tabs at the end.
-function trim_test(p_input clob) return clob is
+--Check if values are equal, update global counter, and output failures.
+procedure assert_like(p_test nvarchar2, p_expected nvarchar2, p_actual nvarchar2) is
+begin
+	g_test_count := g_test_count + 1;
+
+	if p_actual like p_expected or p_expected is null and p_actual is null then
+		g_passed_count := g_passed_count + 1;
+	else
+		g_failed_count := g_failed_count + 1;
+		dbms_output.put_line('Failure with: '||p_test);
+		dbms_output.put_line('Expected: '||chr(10)||'"'||p_expected||'"');
+		dbms_output.put_line('Actual  : '||chr(10)||'"'||p_actual||'"');
+	end if;
+end assert_like;
+
+
+--------------------------------------------------------------------------------
+-- Trim expected results that are displayed in this package code with an extra
+-- newline at the beginning, two tabs on each line, and a newline with two
+-- extra tabs at the end.
+function trim_expected_results(p_input clob) return clob is
 	v_trimmed_output clob := p_input;
 begin
-	--Remove three tabs per line.
-	v_trimmed_output := replace(v_trimmed_output, chr(10)||chr(9)||chr(9)||chr(9), chr(10));
+	--Remove two tabs per line.
+	v_trimmed_output := replace(v_trimmed_output, chr(10)||chr(9)||chr(9), chr(10));
 	--Remove first, extra newline.
 	v_trimmed_output := substr(v_trimmed_output, 2);
-	--Remove last two tabs.
-	v_trimmed_output := substr(v_trimmed_output, 1, length(v_trimmed_output)-2);
+	--Remove last tab.
+	v_trimmed_output := substr(v_trimmed_output, 1, length(v_trimmed_output)-1);
 
 	return v_trimmed_output;
-end trim_test;
+end trim_expected_results;
 
 
 --------------------------------------------------------------------------------
@@ -92,44 +109,79 @@ end setup;
 
 --------------------------------------------------------------------------------
 procedure test_simple is
-	v_output clob;
-	v_result clob;
-	v_actual clob;
 	v_test_name varchar2(100);
+	v_actual    clob;
+	v_expected  clob;
+	v_options   inserter.options_rec;
 begin
-	v_test_name := 'Simple Output 1';
-	v_output := inserter.get_script
-	(
-		p_table_name => 'inserter_test_table',
-		p_select => 'select 1 a_number from dual',
-		p_header_style => inserter.header_style_off,
-		p_footer_style => inserter.footer_style_off,
-		p_commit_style => inserter.commit_style_none,
-		p_sql_terminator => null,
-		p_case_style => inserter.case_lower
-	);
-	assert_equals(v_test_name,
-		trim_test(
-		q'[
-			insert into inserter_test_table(a_number)
-			select 1 from dual
-		]'), v_output);
+	-- Set common options for simple tests. These will make the output as simple as possible.
+	v_options.p_table_name     := 'test1';
+	v_options.p_header_style   := inserter.header_style_off;
+	v_options.p_footer_style   := inserter.footer_style_off;
+	v_options.p_commit_style   := inserter.commit_style_none;
+	v_options.p_sql_terminator := null;
+	v_options.p_column_list    := inserter.column_list_none;
 
-	v_test_name := 'Simple Results 1';
-	v_output := inserter.get_script
-	(
-		p_table_name => 'inserter_test_table',
-		p_select => 'select 1 a_number from dual',
-		p_header_style => inserter.header_style_off,
-		p_footer_style => inserter.footer_style_off,
-		p_commit_style => inserter.commit_style_none,
-		p_sql_terminator => null,
-		p_case_style => inserter.case_lower
-	);
-	execute immediate v_output;
-	execute immediate 'select a_number from inserter_test_table' into v_actual;
-	assert_equals(v_test_name, '1', v_actual);
+	-- Run simple tests.
+	v_test_name := 'Simple Test 1 - String';
+	v_options.p_select := q'[select 'asdf' a from dual]';
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected :=
+	q'[
+		insert into test1
+		select 'asdf' from dual
+	]';
+	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
 
+	v_test_name := 'Simple Test 2 - Number';
+	v_options.p_select := q'[select 1.00001 a from dual]';
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected :=
+	q'[
+		insert into test1
+		select 1.00001 from dual
+	]';
+	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
+
+	v_test_name := 'Simple Test 3 - Date';
+	v_options.p_select := q'[select date '2345-06-07' a from dual]';
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected :=
+	q'[
+		insert into test1
+		select date '2345-06-07' from dual
+	]';
+	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
+
+	v_test_name := 'Simple Test 4 - SYSDATE';
+	v_options.p_select := q'[select sysdate a from dual]';
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected :=
+	q'[
+		insert into test1
+		select timestamp '____-__-__ __:__:__' from dual
+	]';
+	assert_like(v_test_name, trim_expected_results(v_expected), v_actual);
+
+	v_test_name := 'Simple Test 5 - Timestamp';
+	v_options.p_select := q'[select timestamp '2345-06-07 01:23:45.123456789' a from dual]';
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected :=
+	q'[
+		insert into test1
+		select timestamp '2345-06-07 01:23:45.123456789' from dual
+	]';
+	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
+
+	v_test_name := 'Simple Test 6 - SYSTIMESTAMP';
+	v_options.p_select := q'[select systimestamp a from dual]';
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected :=
+	q'[
+		insert into test1
+		select timestamp '____-__-__ __:__:__._________' from dual
+	]';
+	assert_like(v_test_name, trim_expected_results(v_expected), v_actual);
 end test_simple;
 
 

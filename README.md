@@ -38,8 +38,8 @@ Click the "Download ZIP" button, extract the files, CD to the directory with tho
 
 Required Parameters:
 
-* **P_TABLE_NAME** - The name of the table inserted into.
-* **P_SELECT** - A valid SELECT statement. Do not include a semicolon at the end.
+* **P_TABLE_NAME** - The name of the table to insert into.
+* **P_SELECT** - A valid SELECT statement. Do not include a semicolon or slash at the end of the statement.
 
 Optional Parameters:
 
@@ -59,16 +59,19 @@ Optional Parameters:
 			insert into t1(c1)
 			select 1 from dual union all
 			select 2 from dual;
+
 	* *INSERT_STYLE_INSERT_ALL* - Another batching method but wordier and slower than the UNION ALL approach.
 
 			insert all
 				into t1(c1) values(1)
 				into t1(c1) values(2)
 			select * from dual;
+
 	* *INSERT_STYLE_VALUES* - The simplest, slowest approach.
 
 			insert into t1(c1) values (1);
 			insert into t1(c1) values (2);
+
 	* *INSERT_STYLE_VALUES_PLSQLBLOCK* - Not as fast as other batching method, but a good compromise if you want simple inserts.
 
 			begin
@@ -76,6 +79,12 @@ Optional Parameters:
 				insert into t1(c1) values (2);
 			end;
 			/
+
+	* *INSERT_STYLE_SELECT_ONLY* - Useful to create a portable version of your table, perhaps for reproducible test cases.
+
+			select 1 from dual union all
+			select 2 from dual;
+
 * **P_BATCH_SIZE** - The number of rows included in one batch (default 100). You probably don't want to go higher than 100, or you risk running into [parsing performance issues](https://stackoverflow.com/a/11663076/409172) for [no significant benefit](https://stackoverflow.com/a/38664103/409172).
 * **P_COMMIT_STYLE** - Either *COMMIT_STYLE_AT_END* (default), *COMMIT_STYLE_NONE*, or *COMMIT_STYLE_PER_BATCH*.
 * **P_ESCAPE_STYLE** - Either *ESCAPE_STYLE_TWO_QUOTES* (default) or *ESCAPE_STYLE_Q_QUOTES* (q'[...]' style).
