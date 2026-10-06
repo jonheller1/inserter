@@ -49,8 +49,8 @@ function COLUMN_LIST_NONE               return number;
 -- Main function
 function get_script
 (
-	p_table_name           varchar2,
-	p_select               clob,
+	p_source_select        clob,
+	p_target_table         varchar2  default 'TARGET_TABLE',
 	p_date_style           number    default date_style_ansi_literal,
 	p_nls_date_format      varchar2  default null,
 	p_alignment            number    default alignment_unaligned,
@@ -75,8 +75,8 @@ function get_script
 -- This interface is useful if the package is called repeatedly with similar parameters.
 type options_rec is record
 (
-	p_table_name           varchar2(4000),
-	p_select               clob,
+	p_source_select        clob,
+	p_target_table         varchar2(4000) default 'TARGET_TABLE',
 	p_date_style           number         default date_style_ansi_literal,
 	p_nls_date_format      varchar2(4000) default null,
 	p_alignment            number         default alignment_unaligned,
@@ -845,10 +845,14 @@ function get_clob_from_arrays
 		end loop;
 	end add_values;
 
-	procedure end_batch(i number) is
+	procedure end_batch_or_row(i number) is
 	begin
-		--End the batch.
-		if i = v_rows.count or mod(i, p_batch_size) = 0 then
+		if p_insert_style = insert_style_select_only then
+			-- Select only never uses batches.
+			if i < v_rows.count then
+				v_row := v_row || ' ' || g_union_all;
+			end if;
+		elsif i = v_rows.count or mod(i, p_batch_size) = 0 then
 			if p_insert_style = insert_style_values_plsqlblock then
 				--Don't use sql_terminator here - inside a PL/SQL block, nothing but ";" will work.
 				v_row := v_row || chr(10) || g_end || ';' || p_plsql_terminator;
@@ -879,7 +883,7 @@ function get_clob_from_arrays
 				null;
 			end if;
 		end if;
-	end end_batch;
+	end end_batch_or_row;
 
 begin
 	dbms_lob.createtemporary(v_output, true);
@@ -896,26 +900,30 @@ begin
 				v_row := g_insert_into || ' ' || trim(p_table_name) || p_column_expression || chr(10);
 			end if;
 
-			--Fill out a row.
+			-- Fill out the row.
 			v_row := v_row || g_select || ' ';
 			add_values(i);
 			v_row := v_row || ' ' || g_from_dual;
 
-			--End a batch.
-			end_batch(i);
+			-- End the batch or row.
+			end_batch_or_row(i);
+		elsif p_insert_style = insert_style_select_only then
+			v_row := v_row || g_select || ' ';
+			add_values(i);
+			v_row := v_row || ' ' || g_from_dual;
+
+			end_batch_or_row(i);
 		elsif p_insert_style = insert_style_insert_all then
 			--Start a batch.
 			if i = 1 or mod(i-1, p_batch_size) = 0 then
 				v_row := g_insert_all || chr(10);
 			end if;
 
-			--Fill out a row.
 			v_row := v_row || g_into || ' ' || trim(p_table_name) || p_column_expression || ' ' || g_values || '(';
 			add_values(i);
 			v_row := v_row || ')';
 
-			--End a batch.
-			end_batch(i);
+			end_batch_or_row(i);
 		elsif p_insert_style = insert_style_values then
 			--Every row is filled out the same.
 			v_row := g_insert_into || ' ' || trim(p_table_name) || p_column_expression || ' ' || g_values || '(';
@@ -939,8 +947,7 @@ begin
 			add_values(i);
 			v_row := v_row || ')' || p_sql_terminator;
 
-			--End a batch.
-			end_batch(i);
+			end_batch_or_row(i);
 		end if;
 
 		dbms_lob.append(v_output, v_row);
@@ -954,8 +961,8 @@ end get_clob_from_arrays;
 --------------------------------------------------------------------------------
 function get_script
 (
-	p_table_name           varchar2,
-	p_select               clob,
+	p_source_select        clob,
+	p_target_table         varchar2  default 'TARGET_TABLE',
 	p_date_style           number    default date_style_ansi_literal,
 	p_nls_date_format      varchar2  default null,
 	p_alignment            number    default alignment_unaligned,
@@ -995,7 +1002,7 @@ begin
 
 	--Begin parsing.
 	v_cursor := dbms_sql.open_cursor;
-	dbms_sql.parse(v_cursor, p_select, dbms_sql.native);
+	dbms_sql.parse(v_cursor, p_source_select, dbms_sql.native);
 	dbms_sql.describe_columns3(v_cursor, v_column_count, v_column_metadata);
 
 	--Store column header information.
@@ -1009,12 +1016,12 @@ begin
 	v_undefined := dbms_sql.execute(v_cursor); --ignore
 	v_rows := get_rows_from_sql(v_column_count, v_cursor, v_column_metadata, p_date_style, p_nls_date_format, p_timestamp_style, p_nls_timestamp_format, p_escape_style);
 	align_values(p_alignment, v_column_count, v_rows);
-	v_column_expression := get_column_expression(v_header_columns, p_column_list, p_table_name, p_case_style);
-	v_output := get_clob_from_arrays(p_table_name, v_column_expression, v_column_count, v_rows, p_sql_terminator, p_plsql_terminator, p_insert_style, p_batch_size, p_commit_style);
+	v_column_expression := get_column_expression(v_header_columns, p_column_list, p_target_table, p_case_style);
+	v_output := get_clob_from_arrays(p_target_table, v_column_expression, v_column_count, v_rows, p_sql_terminator, p_plsql_terminator, p_insert_style, p_batch_size, p_commit_style);
 
 	--Add header and footer.
-	add_header(v_output, p_table_name, v_rows.count, p_date_style, p_nls_date_format, p_timestamp_style, p_nls_timestamp_format, p_header_style, p_header_custom_value);
-	add_footer(v_output, p_table_name, v_rows.count, p_footer_style, p_footer_custom_value);
+	add_header(v_output, p_target_table, v_rows.count, p_date_style, p_nls_date_format, p_timestamp_style, p_nls_timestamp_format, p_header_style, p_header_custom_value);
+	add_footer(v_output, p_target_table, v_rows.count, p_footer_style, p_footer_custom_value);
 
 	dbms_sql.close_cursor(v_cursor);
 	--dbms_output.put_line(v_output);
@@ -1028,8 +1035,8 @@ function get_script(p_options options_rec) return clob is
 begin
 	return get_script
 	(
-		p_table_name           => p_options.p_table_name          ,
-		p_select               => p_options.p_select              ,
+		p_source_select        => p_options.p_source_select       ,
+		p_target_table         => p_options.p_target_table        ,
 		p_date_style           => p_options.p_date_style          ,
 		p_nls_date_format      => p_options.p_nls_date_format     ,
 		p_alignment            => p_options.p_alignment           ,

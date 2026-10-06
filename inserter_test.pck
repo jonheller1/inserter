@@ -115,7 +115,7 @@ procedure test_simple is
 	v_options   inserter.options_rec;
 begin
 	-- Set common options for simple tests. These will make the output as simple as possible.
-	v_options.p_table_name     := 'test1';
+	v_options.p_target_table   := 'test1';
 	v_options.p_header_style   := inserter.header_style_off;
 	v_options.p_footer_style   := inserter.footer_style_off;
 	v_options.p_commit_style   := inserter.commit_style_none;
@@ -124,7 +124,7 @@ begin
 
 	-- Run simple tests.
 	v_test_name := 'Simple Test 1 - String';
-	v_options.p_select := q'[select 'asdf' a from dual]';
+	v_options.p_source_select := q'[select 'asdf' a from dual]';
 	select inserter.get_script(v_options) into v_actual from dual;
 	v_expected :=
 	q'[
@@ -134,7 +134,7 @@ begin
 	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
 
 	v_test_name := 'Simple Test 2 - Number';
-	v_options.p_select := q'[select 1.00001 a from dual]';
+	v_options.p_source_select := q'[select 1.00001 a from dual]';
 	select inserter.get_script(v_options) into v_actual from dual;
 	v_expected :=
 	q'[
@@ -144,7 +144,7 @@ begin
 	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
 
 	v_test_name := 'Simple Test 3 - Date';
-	v_options.p_select := q'[select date '2345-06-07' a from dual]';
+	v_options.p_source_select := q'[select date '2345-06-07' a from dual]';
 	select inserter.get_script(v_options) into v_actual from dual;
 	v_expected :=
 	q'[
@@ -154,7 +154,7 @@ begin
 	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
 
 	v_test_name := 'Simple Test 4 - SYSDATE';
-	v_options.p_select := q'[select sysdate a from dual]';
+	v_options.p_source_select := q'[select sysdate a from dual]';
 	select inserter.get_script(v_options) into v_actual from dual;
 	v_expected :=
 	q'[
@@ -164,7 +164,7 @@ begin
 	assert_like(v_test_name, trim_expected_results(v_expected), v_actual);
 
 	v_test_name := 'Simple Test 5 - Timestamp';
-	v_options.p_select := q'[select timestamp '2345-06-07 01:23:45.123456789' a from dual]';
+	v_options.p_source_select := q'[select timestamp '2345-06-07 01:23:45.123456789' a from dual]';
 	select inserter.get_script(v_options) into v_actual from dual;
 	v_expected :=
 	q'[
@@ -174,7 +174,7 @@ begin
 	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
 
 	v_test_name := 'Simple Test 6 - SYSTIMESTAMP';
-	v_options.p_select := q'[select systimestamp a from dual]';
+	v_options.p_source_select := q'[select systimestamp a from dual]';
 	select inserter.get_script(v_options) into v_actual from dual;
 	v_expected :=
 	q'[
@@ -183,6 +183,33 @@ begin
 	]';
 	assert_like(v_test_name, trim_expected_results(v_expected), v_actual);
 end test_simple;
+
+
+--------------------------------------------------------------------------------
+procedure test_insert_style is
+	v_test_name varchar2(100);
+	v_actual    clob;
+	v_expected  clob;
+	v_options   inserter.options_rec;
+begin
+	-- Set common options for simple tests. These will make the output as simple as possible.
+	v_options.p_target_table   := 'test1';
+	v_options.p_header_style   := inserter.header_style_off;
+	v_options.p_footer_style   := inserter.footer_style_off;
+
+	-- INSERT_STYLE_SELECT_ONLY
+	v_test_name := 'Simple Test 1 - String';
+	v_options.p_source_select := q'[select 'asdf' a from dual union all select 'qwer' from dual]';
+	v_options.p_insert_style := inserter.insert_style_select_only;
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected :=
+	q'[
+		select 'asdf' from dual union all
+		select 'qwer' from dual
+	]';
+	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
+
+end test_insert_style;
 
 
 --------------------------------------------------------------------------------
@@ -219,6 +246,7 @@ begin
 
 	--Run the tests.
 	test_simple;
+	test_insert_style;
 	test_date_style;
 
 	--Clean up the tests.

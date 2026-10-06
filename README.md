@@ -11,12 +11,12 @@ Inserter aims for the sweet spot - nicely-formatted INSERT scripts that run 10 t
 
 ## Examples
 
-This simple command creates an a script to insert the famous HR.EMPLOYEES table into EMPLOYEES2:
+This simple command creates an a script to insert data from the famous HR.EMPLOYEES table into EMPLOYEES2:
 
 	select inserter.get_script
 	    (
-	        p_table_name => 'employees2',
-	        p_select     => 'select * from hr.employees order by employee_id'
+	        p_source_select => 'select * from hr.employees order by employee_id'
+	        p_target_table  => 'employees2'
 	    )
 	from dual;
 
@@ -48,14 +48,14 @@ Almost every feature can be customized. The below example, for the same data, al
 
 	select inserter.get_script
 	    (
-	        p_table_name   => 'employees2',
-	        p_select       => 'select * from hr.employees order by 1',
-	        p_alignment    => inserter.alignment_aligned,
-	        p_header_style => inserter.header_style_off,
-	        p_footer_style => inserter.footer_style_off,
-	        p_case_style   => inserter.case_upper,
-	        p_batch_size   => 9999,
-	        p_commit_style => inserter.commit_style_none
+	        p_source_select => 'select * from hr.employees order by 1',
+	        p_target_table  => 'employees2',
+	        p_alignment     => inserter.alignment_aligned,
+	        p_header_style  => inserter.header_style_off,
+	        p_footer_style  => inserter.footer_style_off,
+	        p_case_style    => inserter.case_upper,
+	        p_batch_size    => 9999,
+	        p_commit_style  => inserter.commit_style_none
 	    )
 	from dual;
 
@@ -86,11 +86,11 @@ Click the "Download ZIP" button, extract the files, CD to the directory with tho
 
 Required Parameters:
 
-* **P_TABLE_NAME** - The name of the table to insert into.
-* **P_SELECT** - A valid SELECT statement. Do not include a semicolon or slash at the end of the statement.
+* **P_SOURCE_SELECT** - A valid SELECT statement. Do not include a semicolon or slash at the end of the statement.
 
 Optional Parameters:
 
+* **P_TARGET_TABLE** - The name of the table to insert into.
 * **P_DATE_STYLE** - Either *DATE_STYLE_ANSI_LITERAL* (default), *DATE_STYLE_TO_DATE*, or *DATE_STYLE_ALTER_SESSION*.
 * **P_NLS_DATE_FORMAT** - A valid date format string. Only valid if P_DATE_STYLE is TO_DATE or ALTER_SESSION.
 * **P_ALIGNMENT** - Either *ALIGNMENT_UNALIGNED* (default) or *ALIGNMENT_ALIGNED*.
