@@ -123,6 +123,7 @@ g_timestamp           varchar2(100) := 'timestamp';
 g_date                varchar2(100) := 'date';
 g_to_date             varchar2(100) := 'to_date';
 g_to_timestamp        varchar2(100) := 'to_timestamp';
+g_chartorowid         varchar2(100) := 'chartorowid';
 g_begin               varchar2(100) := 'begin';
 g_end                 varchar2(100) := 'end';
 --TODO: Parameterize this?
@@ -345,6 +346,7 @@ begin
 		g_date         := upper(g_date);
 		g_to_date      := upper(g_to_date);
 		g_to_timestamp := upper(g_to_timestamp);
+		g_chartorowid  := upper(g_chartorowid);
 		g_begin        := upper(g_begin);
 		g_end          := upper(g_end);
 	elsif p_case_style = case_camel then
@@ -360,6 +362,7 @@ begin
 		g_date         := initcap(g_date);
 		g_to_date      := initcap(g_to_date);
 		g_to_timestamp := initcap(g_to_timestamp);
+		g_chartorowid  := initcap(g_chartorowid);
 		g_begin        := initcap(g_begin);
 		g_end          := initcap(g_end);
 	end if;
@@ -373,6 +376,7 @@ procedure define_variables(p_column_count number, p_column_metadata dbms_sql.des
 	v_varchar2 varchar2(32767);
 	v_nvarchar2 nvarchar2(32767);
 	v_timestamp timestamp_unconstrained;
+	v_rowid rowid;
 begin
 	--Define variables.
 	for i in 1 .. p_column_count loop
@@ -387,6 +391,8 @@ begin
 		-- Timestamp and SYSTIMESTAMP can be different. Note that DBMS_TYPES is not always accurate.
 		elsif p_column_metadata(i).col_type in (180, 181) then
 			dbms_sql.define_column(p_cursor, i, v_timestamp);
+		elsif p_column_metadata(i).col_type = 11 then
+			dbms_sql.define_column_rowid(p_cursor, i, v_rowid);
 		--TODO: Add more types here.
 		end if;
 	end loop;
@@ -577,18 +583,8 @@ begin
 		return g_null;
 	else
 		if p_timestamp_style = TIMESTAMP_STYLE_ANSI_LITERAL then
-			-- TODO: Shrink trailing zeroes?
-			--Use DATE literal if there is no time, to save space.
-			/*
-			if p_timestamp = trunc(p_timestamp) then
-				return g_date || ' ''' || to_char(p_timestamp, 'YYYY-MM-DD') || '''';
-			--Use TIMESTAMP literal if necessary.
-			else
-				return g_timestamp || ' ''' || to_char(p_timestamp, 'YYYY-MM-DD HH24:MI:SS') || '''';
-			end if;
-			*/
+			-- TODO: Shrink trailing zeroes? Does it matter if the values always have 9 zeroes?
 			return g_timestamp || ' ''' || to_char(p_timestamp, 'YYYY-MM-DD HH24:MI:SS.FF9') || '''';
-
 		elsif p_timestamp_style = timestamp_style_to_timestamp then
 			return g_to_timestamp || '(''' || to_char(p_timestamp, p_nls_timestamp_format) || ''', ''' || p_nls_timestamp_format || ''')';
 		elsif p_timestamp_style = timestamp_style_alter_session then
@@ -600,12 +596,12 @@ end get_string_from_timestamp;
 --------------------------------------------------------------------------------
 function get_string_from_number(p_number number) return varchar2 is
 begin
+	--TODO: Is it really this simple? What about extreme values?
 	if p_number is null then
 		return g_null;
 	else
 		return to_char(p_number);
 	end if;
-	--TODO?
 end get_string_from_number;
 
 --------------------------------------------------------------------------------
@@ -656,6 +652,15 @@ begin
 	return p_nvarchar2;
 end get_string_from_nvarchar2;
 
+--------------------------------------------------------------------------------
+function get_string_from_rowid(p_rowid rowid) return varchar2 is
+begin
+	if p_rowid is null then
+		return g_null;
+	else
+		return g_chartorowid || '(''' || rowidtochar(p_rowid) || ''')';
+	end if;
+end get_string_from_rowid;
 
 --------------------------------------------------------------------------------
 procedure align_values(p_alignment number, p_column_count number, p_rows in out nocopy rows_nt) is
@@ -779,6 +784,7 @@ function get_rows_from_sql
 	v_varchar2  varchar2(32767);
 	v_nvarchar2 nvarchar2(32767);
 	v_timestamp timestamp_unconstrained;
+	v_rowid     rowid;
 begin
 	loop
 		v_row_count := dbms_sql.fetch_rows(v_cursor);
@@ -806,6 +812,9 @@ begin
 			elsif v_column_metadata(i).col_type in (180, 181) then
 				dbms_sql.column_value(v_cursor, i, v_timestamp);
 				v_columns(i) := get_string_from_timestamp(v_timestamp, p_timestamp_style, p_nls_timestamp_format);
+			elsif v_column_metadata(i).col_type = 11 then
+				dbms_sql.column_value_rowid(v_cursor, i, v_rowid);
+				v_columns(i) := get_string_from_rowid(v_rowid);
 			else
 				raise_application_error(-20000, 'Unexpected type: ' || v_column_metadata(i).col_type || ' not yet implemented.');
 			end if;

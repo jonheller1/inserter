@@ -182,6 +182,26 @@ begin
 		select timestamp '____-__-__ __:__:__._________' from dual
 	]';
 	assert_like(v_test_name, trim_expected_results(v_expected), v_actual);
+
+	v_test_name := 'Simple Test 7 - CHAR';
+	v_options.p_source_select := q'[select cast('asdf' as char(10)) from dual]';
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected :=
+	q'[
+		insert into test1
+		select 'asdf      ' from dual
+	]';
+	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
+
+	v_test_name := 'Simple Test 8 - ROWID';
+	v_options.p_source_select := q'[select rowid from dual]';
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected :=
+	q'[
+		insert into test1
+		select chartorowid('__________________') from dual
+	]';
+	assert_like(v_test_name, trim_expected_results(v_expected), v_actual);
 end test_simple;
 
 
