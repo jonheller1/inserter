@@ -128,6 +128,12 @@ Optional Parameters:
 			end;
 			/
 
+	* *INSERT_STYLE_VALUES_CLAUSE* - The table value constructor is probably the best method, but it is only available since version 23ai.
+
+			insert into t1 values
+			(1),
+			(2);
+
 	* *INSERT_STYLE_SELECT_ONLY* - Useful to create a portable version of your table, perhaps for reproducible test cases.
 
 			select 1 from dual union all

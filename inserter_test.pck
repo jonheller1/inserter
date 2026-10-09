@@ -218,14 +218,27 @@ begin
 	v_options.p_footer_style   := inserter.footer_style_off;
 
 	-- INSERT_STYLE_SELECT_ONLY
-	v_test_name := 'Simple Test 1 - String';
+	v_test_name := 'Insert style 1 - INSERT_STYLE_SELECT_ONLY';
 	v_options.p_source_select := q'[select 'asdf' a from dual union all select 'qwer' from dual]';
 	v_options.p_insert_style := inserter.insert_style_select_only;
 	select inserter.get_script(v_options) into v_actual from dual;
 	v_expected :=
 	q'[
 		select 'asdf' from dual union all
-		select 'qwer' from dual
+		select 'qwer' from dual;
+	]';
+	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
+
+	-- INSERT_STYLE_VALUES_CLAUSE
+	v_test_name := 'Insert style 2 - INSERT_STYLE_VALUES_CLAUSE';
+	v_options.p_source_select := q'[select 1 a, 'asdf' b from dual union all select 2 a, 'qwer' b from dual]';
+	v_options.p_insert_style := inserter.insert_style_values_clause;
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected :=
+	q'[
+		insert into test1(a,b) values
+		(1,'asdf'),
+		(2,'qwer');
 	]';
 	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
 

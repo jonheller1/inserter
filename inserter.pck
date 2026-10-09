@@ -31,8 +31,8 @@ function INSERT_STYLE_UNION_ALL         return number;
 function INSERT_STYLE_INSERT_ALL        return number;
 function INSERT_STYLE_VALUES            return number;
 function INSERT_STYLE_VALUES_PLSQLBLOCK return number;
+function INSERT_STYLE_VALUES_CLAUSE     return number;
 function INSERT_STYLE_SELECT_ONLY       return number;
---function INSERT_STYLE_TABLE_VALUES      return number; -- TODO - New 23ai style.
 
 function COMMIT_STYLE_AT_END            return number;
 function COMMIT_STYLE_NONE              return number;
@@ -177,7 +177,8 @@ function INSERT_STYLE_UNION_ALL         return number is begin return 15; end;
 function INSERT_STYLE_INSERT_ALL        return number is begin return 16; end;
 function INSERT_STYLE_VALUES            return number is begin return 17; end;
 function INSERT_STYLE_VALUES_PLSQLBLOCK return number is begin return 18; end;
-function INSERT_STYLE_SELECT_ONLY       return number is begin return 19; end;
+function INSERT_STYLE_VALUES_CLAUSE     return number is begin return 19.1; end;
+function INSERT_STYLE_SELECT_ONLY       return number is begin return 19.2; end;
 
 function COMMIT_STYLE_AT_END            return number is begin return 20; end;
 function COMMIT_STYLE_NONE              return number is begin return 21; end;
@@ -292,10 +293,10 @@ begin
 		raise_application_error(-20000, 'If P_FOOTER_STYLE is set to FOOTER_STYLE_CUSTOM, then P_FOOTER_CUSTOM_VALUE should be non-null.');
 	end if;
 
-	if p_insert_style in (insert_style_union_all, insert_style_insert_all, insert_style_values, insert_style_values_plsqlblock, insert_style_select_only) then
+	if p_insert_style in (insert_style_union_all, insert_style_insert_all, insert_style_values, insert_style_values_plsqlblock, insert_style_values_clause, insert_style_select_only) then
 		null;
 	else
-		raise_application_error(-20000, 'P_INSERT_STYLE must be set to either INSERT_STYLE_UNION_ALL, INSERT_STYLE_INSERT_ALL, INSERT_STYLE_VALUES, INSERT_STYLE_VALUES_PLSQLBLOCK, or INSERT_STYLE_SELECT_ONLY.');
+		raise_application_error(-20000, 'P_INSERT_STYLE must be set to either INSERT_STYLE_UNION_ALL, INSERT_STYLE_INSERT_ALL, INSERT_STYLE_VALUES, INSERT_STYLE_VALUES_PLSQLBLOCK, INSERT_STYLE_VALUES_CLAUSE, or INSERT_STYLE_SELECT_ONLY.');
 	end if;
 
 	--Check P_BATCH_SIZE.
@@ -856,11 +857,17 @@ function get_clob_from_arrays
 
 	procedure end_batch_or_row(i number) is
 	begin
+		-- SELECT_ONLY never has batches.
 		if p_insert_style = insert_style_select_only then
-			-- Select only never uses batches.
 			if i < v_rows.count then
 				v_row := v_row || ' ' || g_union_all;
 			end if;
+
+			-- But it still has an ending.
+			if i = v_rows.count then
+				v_row := v_row || p_sql_terminator;
+			end if;
+		-- End the batch for everything else.
 		elsif i = v_rows.count or mod(i, p_batch_size) = 0 then
 			if p_insert_style = insert_style_values_plsqlblock then
 				--Don't use sql_terminator here - inside a PL/SQL block, nothing but ";" will work.
@@ -871,6 +878,8 @@ function get_clob_from_arrays
 				elsif p_commit_style = commit_style_per_batch then
 					v_row := v_row || chr(10) || 'commit' || p_sql_terminator;
 				end if;
+			elsif p_insert_style = insert_style_values_clause then
+				v_row := v_row || p_sql_terminator;
 			else
 				if p_insert_style = insert_style_insert_all then
 					v_row := v_row || chr(10) || 'select * from dual';
@@ -888,6 +897,8 @@ function get_clob_from_arrays
 		else
 			if p_insert_style = insert_style_union_all then
 				v_row := v_row || ' ' || g_union_all;
+			elsif p_insert_style = insert_style_values_clause then
+				v_row := v_row || ',';
 			elsif p_insert_style = insert_style_insert_all then
 				null;
 			end if;
@@ -957,6 +968,18 @@ begin
 			v_row := v_row || ')' || p_sql_terminator;
 
 			end_batch_or_row(i);
+
+		elsif p_insert_style = insert_style_values_clause then
+			--Start a batch.
+			if i = 1 or mod(i-1, p_batch_size) = 0 then
+				v_row := g_insert_into || ' ' || trim(p_table_name) || p_column_expression || ' ' || g_values || chr(10);
+			end if;
+
+			v_row := v_row || '(';
+			add_values(i);
+			v_row := v_row || ')';
+
+			end_batch_or_row(i);
 		end if;
 
 		dbms_lob.append(v_output, v_row);
@@ -1011,7 +1034,12 @@ begin
 
 	--Begin parsing.
 	v_cursor := dbms_sql.open_cursor;
-	dbms_sql.parse(v_cursor, p_source_select, dbms_sql.native);
+	begin
+		dbms_sql.parse(v_cursor, p_source_select, dbms_sql.native);
+	exception when others then
+		raise_application_error(-20000, 'There was an error running your SELECT statement. Please check that ' ||
+			'the query you submitted is valid. Error:' || chr(10) || dbms_utility.format_error_stack);
+	end;
 	dbms_sql.describe_columns3(v_cursor, v_column_count, v_column_metadata);
 
 	--Store column header information.
@@ -1022,7 +1050,7 @@ begin
 
 	--Start dynamic execution, retrieve data and format it.
 	define_variables(v_column_count, v_column_metadata, v_cursor);
-	v_undefined := dbms_sql.execute(v_cursor); --ignore
+	v_undefined := dbms_sql.execute(v_cursor); --Ignore compiler warnings.
 	v_rows := get_rows_from_sql(v_column_count, v_cursor, v_column_metadata, p_date_style, p_nls_date_format, p_timestamp_style, p_nls_timestamp_format, p_escape_style);
 	align_values(p_alignment, v_column_count, v_rows);
 	v_column_expression := get_column_expression(v_header_columns, p_column_list, p_target_table, p_case_style);
