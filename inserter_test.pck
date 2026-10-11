@@ -87,7 +87,8 @@ procedure tear_down is
 	v_table_does_not_exist exception;
 	pragma exception_init(v_table_does_not_exist, -00942);
 begin
-	execute immediate 'drop table inserter_test_table purge';
+	execute immediate 'drop table inserter_test_table_source purge';
+	execute immediate 'drop table inserter_test_table_target purge';
 exception when v_table_does_not_exist then null;
 end tear_down;
 
@@ -96,7 +97,7 @@ procedure setup is
 begin
 	execute immediate
 	'
-		create table inserter_test_table
+		create table inserter_test_table_source
 		(
 			a_number number,
 			a_varchar2 varchar2(4000),
@@ -104,6 +105,20 @@ begin
 			a_timestamp timestamp
 		)
 	';
+
+	execute immediate
+	q'[
+		insert into inserter_test_table_source
+		select 1, 'asdf', date '2000-01-01', timestamp '2000-01-01 00:00:01' from dual union all
+		select 2, 'qwer', date '3000-01-01', timestamp '3000-01-01 00:00:01' from dual
+	]';
+
+	execute immediate
+	'
+		create table inserter_test_table_target as
+		select * from inserter_test_table_source where 1=0
+	';
+
 end setup;
 
 
@@ -260,6 +275,44 @@ end test_date_style;
 
 
 --------------------------------------------------------------------------------
+procedure test_table_minus is
+	v_insert_sql clob;
+	v_source_count number;
+	v_target_count number;
+	v_rowcount number;
+begin
+	-- Get an executable insert statement.
+	select inserter.get_script(
+		p_source_select  => 'select * from inserter_test_table_source',
+		p_target_table   => 'inserter_test_table_target',
+		p_header_style   => inserter.header_style_off,
+		p_footer_style   => inserter.footer_style_off,
+		p_commit_style   => inserter.commit_style_none,
+		p_sql_terminator => null)
+	into v_insert_sql
+	from dual;
+
+	-- Execute it.
+	execute immediate v_insert_sql;
+
+	-- Check that the source and target rowcounts are identical.
+	execute immediate 'select count(*) from inserter_test_table_source'
+	into v_source_count;
+
+	execute immediate 'select count(*) from inserter_test_table_target'
+	into v_target_count;
+
+	assert_equals('Table minus 1 - row counts', v_source_count, v_target_count);
+
+	-- Check that the table contents are equal.
+	execute immediate 'select count(*) from (select * from inserter_test_table_source minus select * from inserter_test_table_source)'
+	into v_rowcount;
+	assert_equals('Table minus 2 - rows different', 0, v_rowcount);
+
+end test_table_minus;
+
+
+--------------------------------------------------------------------------------
 procedure run is
 begin
 	--Reset counters.
@@ -281,9 +334,11 @@ begin
 	test_simple;
 	test_insert_style;
 	test_date_style;
+	test_table_minus;
 
 	--Clean up the tests.
-	tear_down;
+	--TODO: It's convenient to have the test tables exist afterwards.
+	--tear_down;
 
 	--Print summary of results.
 	dbms_output.put_line(null);
