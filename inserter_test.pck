@@ -102,15 +102,21 @@ begin
 			a_number number,
 			a_varchar2 varchar2(4000),
 			a_date date,
-			a_timestamp timestamp
+			a_timestamp timestamp,
+			a_rowid rowid
 		)
 	';
 
 	execute immediate
 	q'[
 		insert into inserter_test_table_source
-		select 1, 'asdf', date '2000-01-01', timestamp '2000-01-01 00:00:01' from dual union all
-		select 2, 'qwer', date '3000-01-01', timestamp '3000-01-01 00:00:01' from dual
+		select 1, 'asdf', date '2000-01-01', timestamp '2000-01-01 00:00:01', null from dual union all
+		select 2, 'qwer', date '3000-01-01', timestamp '3000-01-01 00:00:01', null from dual
+	]';
+
+	execute immediate
+	q'[
+		update inserter_test_table_source set a_rowid = (select min(rowid) from inserter_test_table_source)
 	]';
 
 	execute immediate
@@ -313,6 +319,46 @@ end test_table_minus;
 
 
 --------------------------------------------------------------------------------
+procedure test_unsupported_types is
+	v_unused_result clob;
+	v_error_message clob;
+	v_expected  clob;
+begin
+	-- Error message for only one unsupported column.
+	begin
+		select inserter.get_script(p_source_select => q'[select hextoraw('54657374') a from dual]')
+		into v_unused_result
+		from dual;
+	exception when others then
+		v_error_message := sqlerrm;
+	end;
+	v_expected :=
+	q'[
+		ORA-20000: This column has an unexpected or unsupported type. Either remove this column or rewrite it into an expression that returns a supported type, such as VARCHAR2.
+		Name: A, Type: RAW, Type Code: 23
+	]';
+	assert_like('Unupported type 1 - One bad columns', trim_expected_results(v_expected) || '%', v_error_message);
+
+	-- Error message for multiple unsupported columns.
+	begin
+		select inserter.get_script(p_source_select => q'[select hextoraw('54657374') a, hextoraw('54657374') b from dual]')
+		into v_unused_result
+		from dual;
+	exception when others then
+		v_error_message := sqlerrm;
+	end;
+	v_expected :=
+	q'[
+		ORA-20000: These columns have unexpected or unsupported types. Either remove these columns or rewrite them into expressions that return a supported type, such as VARCHAR2.
+		Name: A, Type: RAW, Type Code: 23
+		Name: B, Type: RAW, Type Code: 23
+	]';
+	assert_like('Unupported type 2 - Two bad columns', trim_expected_results(v_expected) || '%', v_error_message);
+
+end test_unsupported_types;
+
+
+--------------------------------------------------------------------------------
 procedure run is
 begin
 	--Reset counters.
@@ -335,6 +381,7 @@ begin
 	test_insert_style;
 	test_date_style;
 	test_table_minus;
+	test_unsupported_types;
 
 	--Clean up the tests.
 	--TODO: It's convenient to have the test tables exist afterwards.

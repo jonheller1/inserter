@@ -378,11 +378,14 @@ procedure define_variables(p_column_count number, p_column_metadata dbms_sql.des
 	v_nvarchar2 nvarchar2(32767);
 	v_timestamp timestamp_unconstrained;
 	v_rowid rowid;
+
+	v_errors sys.odcivarchar2list := sys.odcivarchar2list();
+	v_error_message varchar2(32767);
 begin
 	/*
-	The values of COL_TYPE are based on the Data Types chapter of the "Oracle Call Interface Developer's Guide":
+	Most of the values of COL_TYPE are from this source:
+	The "Data Types" chapter of the "Oracle Call Interface Developer's Guide":
 	https://docs.oracle.com/en/database/oracle/oracle-database/26/lnoci/data-types.html#GUID-7DA48B90-07C7-41A7-BC57-D8F358A4EEBE
-	Note that DBMS_TYPES is NOT always accurate and should not be used.
 
 	Data Type Code    Data Type                                                Maximum Internal Length
 	--------------    ---------                                                ------------------------
@@ -408,15 +411,47 @@ begin
 	           183    INTERVAL DAY TO SECOND                                   11 bytes
 	           208    UROWID                                                   3950 bytes
 	           231    TIMESTAMP WITH LOCAL TIME ZONE                           11 bytes
+
+	But a few of the values, marked by an asterisk below, can only be found in this source:
+	The "Oracle Dynamic SQL: Method 4" chapter of the "Pro*C/C++ Developer's Guide":
+	https://docs.oracle.com/en/database/oracle/oracle-database/26/lnpcc/Oracle-dynamic-SQL-method-4.html
+
+	Code    External Datatype
+	----    -----------------
+	  1     VARCHAR2
+	  2     NUMBER
+	  3     INTEGER
+	  4     FLOAT
+	  5     STRING
+	  6     VARNUM
+	  7     DECIMAL
+	  8     LONG
+	 21     SQLT_BFLOAT
+	 22     SQLT_BDOUBLE
+	  9     VARCHAR
+	 11*    ROWID
+	 12     DATE
+	 15     VARRAW
+	 23     RAW
+	 24     LONG RAW
+	 68     UNSIGNED
+	 91     DISPLAY
+	 94     LONG VARCHAR
+	 95     LONG VARRAW
+	 96     CHAR
+	 96     CHARF
+	 97     CHARZ
+
+	Not all of the above values are represented below.
+	Note that DBMS_TYPES is NOT always accurate and should not be used.
 	*/
 
 	--Define variables.
 	for i in 1 .. p_column_count loop
-
 		-- TEST:
 		--dbms_output.put_line('Type: ' || p_column_metadata(i).col_type);
 
-
+		-- VARCHAR2/NVARCHAR2
 		if p_column_metadata(i).col_type = 1 then
 			if p_column_metadata(i).col_charsetform = 1 then
 				dbms_sql.define_column(p_cursor, i, v_varchar2, 32767);
@@ -424,35 +459,64 @@ begin
 				dbms_sql.define_column(p_cursor, i, v_nvarchar2, 32767);
 			-- TODO: Else error?
 			end if;
+		-- NUMBER
 		elsif p_column_metadata(i).col_type = 2 then
 			dbms_sql.define_column(p_cursor, i, v_number);
-
-		elsif p_column_metadata(i).col_type = dbms_types.typecode_date then
+		-- LONG
+		elsif p_column_metadata(i).col_type = 8 then
+			--TODO:
+			v_errors.extend;
+			v_errors(v_errors.count) := 'Name: '||p_column_metadata(i).col_name||', Type: LONG, Type Code: '||p_column_metadata(i).col_type;
+		-- ROWID
+		elsif p_column_metadata(i).col_type = 11 then
+			dbms_sql.define_column_rowid(p_cursor, i, v_rowid);
+		-- DATE
+		elsif p_column_metadata(i).col_type = 12 then
 			dbms_sql.define_column(p_cursor, i, v_date);
-
-
+		-- RAW
+		elsif p_column_metadata(i).col_type = 23 then
+			--TODO:
+			v_errors.extend;
+			v_errors(v_errors.count) := 'Name: '||p_column_metadata(i).col_name||', Type: RAW, Type Code: '||p_column_metadata(i).col_type;
 		elsif p_column_metadata(i).col_type = 96 then
 			if p_column_metadata(i).col_charsetform = 1 then
 				dbms_sql.define_column(p_cursor, i, v_varchar2, 32767);
 			elsif p_column_metadata(i).col_charsetform = 2 then
 				dbms_sql.define_column(p_cursor, i, v_varchar2, 32767);
 			end if;
-
-
 		-- Timestamp and SYSTIMESTAMP can be different. Note that DBMS_TYPES is not always accurate.
 		elsif p_column_metadata(i).col_type in (180, 181) then
 			dbms_sql.define_column(p_cursor, i, v_timestamp);
-		elsif p_column_metadata(i).col_type = 11 then
-			dbms_sql.define_column_rowid(p_cursor, i, v_rowid);
+
 		--TODO: Add more types here.
 		-- TODO: Match this IF statedment with the one below.
 
-
-		--else
-		--	raise_application_error(-20000, 'Unexpected type: ' || v_column_metadata(i).col_type || ' not yet implemented.');
-
+		else
+			v_errors.extend;
+			v_errors(v_errors.count) := 'Name: '||p_column_metadata(i).col_name||', Type: (Unknown), Type Code: '||p_column_metadata(i).col_type;
 		end if;
 	end loop;
+
+	-- If there are any unexpected types, print them all separated by newlines.
+	if v_errors.count >= 1 then
+		-- Build list of errors.
+		for i in 1 .. v_errors.count loop
+			v_error_message := v_error_message || v_errors(i) || chr(10);
+		end loop;
+
+		-- Remove last newline.
+		v_error_message := substr(v_error_message, 1, length(v_error_message) - 1);
+
+		-- Print right message depending on the count.
+		if v_errors.count = 1 then
+			raise_application_error(-20000, 'This column has an unexpected or unsupported type. ' ||
+				'Either remove this column or rewrite it into an expression that returns a supported type, such as VARCHAR2.' || chr(10) || v_error_message);
+		else
+			raise_application_error(-20000, 'These columns have unexpected or unsupported types. ' ||
+				'Either remove these columns or rewrite them into expressions that return a supported type, such as VARCHAR2.' || chr(10) || v_error_message);
+		end if;
+	end if;
+
 end define_variables;
 
 
@@ -853,7 +917,7 @@ begin
 		v_columns.extend(v_column_count);
 
 		for i in 1 .. v_column_count loop
-
+			-- VARCHAR2/NVARCHAR2
 			if v_column_metadata(i).col_type = 1 then
 				if v_column_metadata(i).col_charsetform = 1 then
 					dbms_sql.column_value(v_cursor, i, v_varchar2);
@@ -863,14 +927,21 @@ begin
 					v_columns(i) := get_string_from_nvarchar2(v_varchar2, p_escape_style);
 				--TODO: Else error?
 				end if;
+			-- NUMBER
 			elsif v_column_metadata(i).col_type = 2 then
 				dbms_sql.column_value(v_cursor, i, v_number);
 				v_columns(i) := get_string_from_number(v_number);
-
-			elsif v_column_metadata(i).col_type = dbms_types.typecode_date then
+			-- LONG (TODO)
+			elsif v_column_metadata(i).col_type = 8 then
+				null;
+			-- ROWID
+			elsif v_column_metadata(i).col_type = 11 then
+				dbms_sql.column_value_rowid(v_cursor, i, v_rowid);
+				v_columns(i) := get_string_from_rowid(v_rowid);
+			-- DATE
+			elsif v_column_metadata(i).col_type = 12 then
 				dbms_sql.column_value(v_cursor, i, v_date);
 				v_columns(i) := get_string_from_date(v_date, p_date_style, p_nls_date_format);
-
 			elsif v_column_metadata(i).col_type in (dbms_types.typecode_nchar, dbms_types.typecode_nvarchar2) then
 				dbms_sql.column_value(v_cursor, i, v_nvarchar2);
 				v_columns(i) := get_string_from_nvarchar2(v_nvarchar2, p_escape_style);
@@ -892,9 +963,6 @@ begin
 			elsif v_column_metadata(i).col_type in (180, 181) then
 				dbms_sql.column_value(v_cursor, i, v_timestamp);
 				v_columns(i) := get_string_from_timestamp(v_timestamp, p_timestamp_style, p_nls_timestamp_format);
-			elsif v_column_metadata(i).col_type = 11 then
-				dbms_sql.column_value_rowid(v_cursor, i, v_rowid);
-				v_columns(i) := get_string_from_rowid(v_rowid);
 			else
 				raise_application_error(-20000, 'Unexpected type: ' || v_column_metadata(i).col_type || ' not yet implemented.');
 			end if;
