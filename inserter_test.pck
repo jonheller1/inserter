@@ -89,6 +89,7 @@ procedure tear_down is
 begin
 	execute immediate 'drop table inserter_test_table_source purge';
 	execute immediate 'drop table inserter_test_table_target purge';
+	execute immediate 'drop table inserter_test_long';
 exception when v_table_does_not_exist then null;
 end tear_down;
 
@@ -103,15 +104,16 @@ begin
 			a_varchar2 varchar2(4000),
 			a_date date,
 			a_timestamp timestamp,
-			a_rowid rowid
+			a_rowid rowid,
+			a_char char(10)
 		)
 	';
 
 	execute immediate
 	q'[
 		insert into inserter_test_table_source
-		select 1, 'asdf', date '2000-01-01', timestamp '2000-01-01 00:00:01', null from dual union all
-		select 2, 'qwer', date '3000-01-01', timestamp '3000-01-01 00:00:01', null from dual
+		select 1, 'asdf', date '2000-01-01', timestamp '2000-01-01 00:00:01', null, 'asdf' from dual union all
+		select 2, 'qwer', date '3000-01-01', timestamp '3000-01-01 00:00:01', null, 'qwer' from dual
 	]';
 
 	execute immediate
@@ -123,6 +125,15 @@ begin
 	'
 		create table inserter_test_table_target as
 		select * from inserter_test_table_source where 1=0
+	';
+
+	execute immediate
+	'
+		create table inserter_test_long
+		(
+			id     number,
+			a_long long
+		)
 	';
 
 end setup;
@@ -319,6 +330,58 @@ end test_table_minus;
 
 
 --------------------------------------------------------------------------------
+procedure test_long is
+	v_test_name varchar2(100);
+	v_actual    clob;
+	v_expected  clob;
+	v_options   inserter.options_rec;
+begin
+	-- Set common options for simple tests. These will make the output as simple as possible.
+	v_options.p_target_table   := 'inserter_test_long';
+	v_options.p_header_style   := inserter.header_style_off;
+	v_options.p_footer_style   := inserter.footer_style_off;
+	v_options.p_commit_style   := inserter.commit_style_none;
+	v_options.p_sql_terminator := null;
+	v_options.p_column_list    := inserter.column_list_none;
+
+	-- Test a few bytes of LONG.
+	v_test_name := 'LONG 1 - Small value';
+	execute immediate q'[ insert into inserter_test_long values(1, 'asdf') ]';
+	v_options.p_source_select := q'[select * from inserter_test_long]';
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected :=
+	q'[
+		insert into inserter_test_long
+		select 1,'asdf' from dual
+	]';
+	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
+
+	-- Test the largets possible value (for this program anyway).
+	v_test_name := 'LONG 2 - Large value';
+	execute immediate
+	q'[
+		declare
+			v_long1 long := lpad('A', 4000, 'A');
+		begin
+			insert into inserter_test_long values(2, v_long1);
+		end;
+	]';
+	v_options.p_source_select := q'[select * from inserter_test_long where id = 2]';
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected := replace(
+	q'[
+		insert into inserter_test_long
+		select 2,'#4KA#' from dual
+	]', '#4KA#', lpad('A', 4000, 'A'));
+	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
+
+
+	--TODO: Test exception.
+
+end test_long;
+
+
+--------------------------------------------------------------------------------
 procedure test_unsupported_types is
 	v_unused_result clob;
 	v_error_message clob;
@@ -381,6 +444,7 @@ begin
 	test_insert_style;
 	test_date_style;
 	test_table_minus;
+	test_long;
 	test_unsupported_types;
 
 	--Clean up the tests.

@@ -464,9 +464,7 @@ begin
 			dbms_sql.define_column(p_cursor, i, v_number);
 		-- LONG
 		elsif p_column_metadata(i).col_type = 8 then
-			--TODO:
-			v_errors.extend;
-			v_errors(v_errors.count) := 'Name: '||p_column_metadata(i).col_name||', Type: LONG, Type Code: '||p_column_metadata(i).col_type;
+			dbms_sql.define_column_long(p_cursor, i);
 		-- ROWID
 		elsif p_column_metadata(i).col_type = 11 then
 			dbms_sql.define_column_rowid(p_cursor, i, v_rowid);
@@ -895,6 +893,7 @@ function get_rows_from_sql
 ) return rows_nt is
 	v_rows rows_nt := rows_nt();
 	v_row_count number;
+	v_rows_exported number := 0;
 
 	--Store the results in a 2D array.
 	v_columns columns_nt;
@@ -910,6 +909,7 @@ begin
 	loop
 		v_row_count := dbms_sql.fetch_rows(v_cursor);
 		exit when v_row_count = 0;
+		v_rows_exported := v_rows_exported + 1;
 
 		--Create new row entry, and new array for storing columns.
 		v_rows.extend;
@@ -933,7 +933,20 @@ begin
 				v_columns(i) := get_string_from_number(v_number);
 			-- LONG (TODO)
 			elsif v_column_metadata(i).col_type = 8 then
-				null;
+				declare
+					v_value_length number;
+				begin
+					dbms_sql.column_value_long(v_cursor, i, length => 4001, offset => 0, value => v_varchar2, value_length => v_value_length);
+					-- Raise an error, because a single string larger than 4K would fail on import anyway.
+					-- (Weird tricks with extended data types or concatenation might help, but only so far.
+					--  Eventually, for really large data, you just need to use the official binary tools.)
+					if v_value_length >= 4001 then
+						raise_application_error(-20000, 'Error exporting row ' || v_rows_exported || ' for column '
+							|| v_column_metadata(i).col_name || '. ' || 'Inserter Cannot export a LONG larger than 4000 bytes. ' ||
+							'For large data, you may want to consider another tool, such as Oracle Data Pump.');
+					end if;
+					v_columns(i) := get_string_from_varchar2(v_varchar2, p_escape_style);
+				end;
 			-- ROWID
 			elsif v_column_metadata(i).col_type = 11 then
 				dbms_sql.column_value_rowid(v_cursor, i, v_rowid);
