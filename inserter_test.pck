@@ -356,7 +356,7 @@ begin
 	]';
 	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
 
-	-- Test the largets possible value (for this program anyway).
+	-- Test the largest possible value (for this program anyway).
 	v_test_name := 'LONG 2 - Large value';
 	execute immediate
 	q'[
@@ -375,8 +375,29 @@ begin
 	]', '#4KA#', lpad('A', 4000, 'A'));
 	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
 
-
-	--TODO: Test exception.
+	-- Test a value that is too large to meaningfully export.
+	v_test_name := 'LONG 3 - Large value';
+	execute immediate
+	q'[
+		declare
+			-- Note that you cannot simply concatenate varchar2s to make the long.
+			v_long1 long := lpad('A', 4000, 'A');
+			v_long2 long := 'A';
+			v_long3 long := v_long1 || v_long2;
+		begin
+			insert into inserter_test_long values(3, v_long3);
+		end;
+	]';
+	v_options.p_source_select := q'[select * from inserter_test_long where id = 3]';
+	begin
+		select inserter.get_script(v_options) into v_actual from dual;
+		assert_equals(v_test_name, 'An exception', 'No exception');
+	exception when others then
+		assert_like(v_test_name, 'ORA-20000: Error exporting row 1 for column A_LONG. '||
+			'Inserter Cannot export a LONG larger than 4000 bytes. '||
+			'For large data, you may want to consider another tool, such as Oracle Data Pump.%',
+			sqlerrm);
+	end;
 
 end test_long;
 
