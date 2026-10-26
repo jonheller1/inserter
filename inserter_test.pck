@@ -105,15 +105,17 @@ begin
 			a_date date,
 			a_timestamp timestamp,
 			a_rowid rowid,
-			a_char char(10)
+			a_char char(10),
+			a_nvarchar2 nvarchar2(2000)
 		)
 	';
 
 	execute immediate
 	q'[
 		insert into inserter_test_table_source
-		select 1, 'asdf', date '2000-01-01', timestamp '2000-01-01 00:00:01', null, 'asdf' from dual union all
-		select 2, 'qwer', date '3000-01-01', timestamp '3000-01-01 00:00:01', null, 'qwer' from dual
+		select 1, 'asdf', date '2000-01-01', timestamp '2000-01-01 00:00:01', null, 'asdf', n'asdf'               from dual union all
+		-- unistr('\D83D\DE00') is the "Grinning Face" emoji.
+		select 2, 'qwer', date '3000-01-01', timestamp '3000-01-01 00:00:01', null, 'qwer', unistr('\D83D\DE00')  from dual
 	]';
 
 	execute immediate

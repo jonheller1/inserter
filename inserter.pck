@@ -126,6 +126,7 @@ g_to_timestamp        varchar2(100) := 'to_timestamp';
 g_chartorowid         varchar2(100) := 'chartorowid';
 g_begin               varchar2(100) := 'begin';
 g_end                 varchar2(100) := 'end';
+g_n                   varchar2(100) := 'n';
 --TODO: Parameterize this?
 g_indent              varchar2(100) := '  ';
 
@@ -350,6 +351,7 @@ begin
 		g_chartorowid  := upper(g_chartorowid);
 		g_begin        := upper(g_begin);
 		g_end          := upper(g_end);
+		g_n            := upper(g_n);
 	elsif p_case_style = case_camel then
 		g_insert_into  := initcap(g_insert_into);
 		g_insert_all   := initcap(g_insert_all);
@@ -366,6 +368,7 @@ begin
 		g_chartorowid  := initcap(g_chartorowid);
 		g_begin        := initcap(g_begin);
 		g_end          := initcap(g_end);
+		g_n            := initcap(g_n);
 	end if;
 end set_keyword_case;
 
@@ -457,7 +460,6 @@ begin
 				dbms_sql.define_column(p_cursor, i, v_varchar2, 32767);
 			elsif p_column_metadata(i).col_charsetform = 2 then
 				dbms_sql.define_column(p_cursor, i, v_nvarchar2, 32767);
-			-- TODO: Else error?
 			end if;
 		-- NUMBER
 		elsif p_column_metadata(i).col_type = 2 then
@@ -766,9 +768,44 @@ end get_string_from_varchar2;
 
 --------------------------------------------------------------------------------
 function get_string_from_nvarchar2(p_nvarchar2 varchar2, p_escape_style number) return varchar2 is
+	v_escape_start nvarchar2(1);
+	v_escape_end   nvarchar2(1);
+
+	---------------------------------------------------------------------------
+	--Return available quote delimiters so there's no conflict with the user's code.
+	procedure get_available_quote_delimiter(p_string in nvarchar2, p_start_delimiter out nvarchar2, p_end_delimiter out nvarchar2) is
+	begin
+		--Find the first available delimiter and return it.
+		for i in 1 .. c_end_delimiters.count loop
+			if instr(p_string, c_end_delimiters(i)||'''') = 0 then
+				p_start_delimiter := c_start_delimiters(i);
+				p_end_delimiter   := c_end_delimiters(i);
+				return;
+			end if;
+		end loop;
+
+		--Exhausting all identifiers is possible, but incredibly unlikely.
+		raise_application_error(-20010, 'You have used every possible quote identifier, '||
+			'you must remove at least one from the code.');
+	end get_available_quote_delimiter;
+
 begin
-	--TODO
-	return p_nvarchar2;
+	if p_nvarchar2 is null then
+		return g_null;
+	else
+		--For escaping, just double up the quotes.
+		if p_escape_style = escape_style_two_quotes then
+			return g_n || '''' || replace(p_nvarchar2, '''', '''''') || '''';
+		--For q quotes, find an available escape, and add it to the front and back if necessary.
+		else
+			if instr(p_nvarchar2, '''') <> 0 then
+				get_available_quote_delimiter(p_nvarchar2, v_escape_start, v_escape_end);
+				return g_n || 'q''' || v_escape_start || p_nvarchar2 || v_escape_end || '''';
+			else
+				return g_n || '''' || p_nvarchar2 || '''';
+			end if;
+		end if;
+	end if;
 end get_string_from_nvarchar2;
 
 --------------------------------------------------------------------------------
@@ -923,9 +960,8 @@ begin
 					dbms_sql.column_value(v_cursor, i, v_varchar2);
 					v_columns(i) := get_string_from_varchar2(v_varchar2, p_escape_style);
 				elsif v_column_metadata(i).col_charsetform = 2 then
-					dbms_sql.column_value(v_cursor, i, v_varchar2);
-					v_columns(i) := get_string_from_nvarchar2(v_varchar2, p_escape_style);
-				--TODO: Else error?
+					dbms_sql.column_value(v_cursor, i, v_nvarchar2);
+					v_columns(i) := get_string_from_nvarchar2(v_nvarchar2, p_escape_style);
 				end if;
 			-- NUMBER
 			elsif v_column_metadata(i).col_type = 2 then
@@ -969,9 +1005,6 @@ begin
 					v_columns(i) := get_string_from_nvarchar2(v_nvarchar2, p_escape_style);
 				--TODO: Else error?
 				end if;
-
-
-
 			-- Timestamp and SYSTIMESTAMP can be different. Note that DBMS_TYPES is not always accurate.
 			elsif v_column_metadata(i).col_type in (180, 181) then
 				dbms_sql.column_value(v_cursor, i, v_timestamp);
