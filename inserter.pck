@@ -381,6 +381,8 @@ procedure define_variables(p_column_count number, p_column_metadata dbms_sql.des
 	v_nvarchar2 nvarchar2(32767);
 	v_timestamp timestamp_unconstrained;
 	v_rowid rowid;
+	v_clob clob;
+	v_nclob nclob;
 
 	v_errors sys.odcivarchar2list := sys.odcivarchar2list();
 	v_error_message varchar2(32767);
@@ -478,11 +480,19 @@ begin
 			--TODO:
 			v_errors.extend;
 			v_errors(v_errors.count) := 'Name: '||p_column_metadata(i).col_name||', Type: RAW, Type Code: '||p_column_metadata(i).col_type;
+		-- CHAR, NCHAR
 		elsif p_column_metadata(i).col_type = 96 then
 			if p_column_metadata(i).col_charsetform = 1 then
 				dbms_sql.define_column(p_cursor, i, v_varchar2, 32767);
 			elsif p_column_metadata(i).col_charsetform = 2 then
-				dbms_sql.define_column(p_cursor, i, v_varchar2, 32767);
+				dbms_sql.define_column(p_cursor, i, v_nvarchar2, 32767);
+			end if;
+		-- CLOB, NCLOB
+		elsif p_column_metadata(i).col_type = 112 then
+			if p_column_metadata(i).col_charsetform = 1 then
+				dbms_sql.define_column(p_cursor, i, v_clob);
+			elsif p_column_metadata(i).col_charsetform = 2 then
+				dbms_sql.define_column(p_cursor, i, v_nclob);
 			end if;
 		-- Timestamp and SYSTIMESTAMP can be different. Note that DBMS_TYPES is not always accurate.
 		elsif p_column_metadata(i).col_type in (180, 181) then
@@ -808,6 +818,7 @@ begin
 	end if;
 end get_string_from_nvarchar2;
 
+
 --------------------------------------------------------------------------------
 function get_string_from_rowid(p_rowid rowid) return varchar2 is
 begin
@@ -942,6 +953,8 @@ function get_rows_from_sql
 	v_nvarchar2 nvarchar2(32767);
 	v_timestamp timestamp_unconstrained;
 	v_rowid     rowid;
+	v_clob      clob;
+	v_nclob     nclob;
 begin
 	loop
 		v_row_count := dbms_sql.fetch_rows(v_cursor);
@@ -994,7 +1007,7 @@ begin
 			elsif v_column_metadata(i).col_type in (dbms_types.typecode_nchar, dbms_types.typecode_nvarchar2) then
 				dbms_sql.column_value(v_cursor, i, v_nvarchar2);
 				v_columns(i) := get_string_from_nvarchar2(v_nvarchar2, p_escape_style);
-
+			-- CHAR, NCHAR
 			--TODO: Is it OK to use dbms_sql.column_value instead of dbms_sql.column_value_char?
 			elsif v_column_metadata(i).col_type = 96 then
 				if v_column_metadata(i).col_charsetform = 1 then
@@ -1003,7 +1016,27 @@ begin
 				elsif v_column_metadata(i).col_charsetform = 2 then
 					dbms_sql.column_value(v_cursor, i, v_nvarchar2);
 					v_columns(i) := get_string_from_nvarchar2(v_nvarchar2, p_escape_style);
-				--TODO: Else error?
+				end if;
+			-- CLOB, NCLOB
+			elsif v_column_metadata(i).col_type = 112 then
+				if v_column_metadata(i).col_charsetform = 1 then
+					dbms_sql.column_value(v_cursor, i, v_clob);
+					v_varchar2 := dbms_lob.substr(v_clob, 4001, 1);
+					if lengthb(v_varchar2) >= 4001 then
+						raise_application_error(-20000, 'Error exporting row ' || v_rows_exported || ' for column '
+							|| v_column_metadata(i).col_name || '. ' || 'Inserter Cannot export a CLOB larger than 4000 bytes. ' ||
+							'For large data, you may want to consider another tool, such as Oracle Data Pump.');
+					end if;
+					v_columns(i) := get_string_from_varchar2(v_varchar2, p_escape_style);
+				elsif v_column_metadata(i).col_charsetform = 2 then
+					dbms_sql.column_value(v_cursor, i, v_nclob);
+					v_nvarchar2 := dbms_lob.substr(v_nclob, 4001, 1);
+					if lengthb(v_nvarchar2) >= 4001 then
+						raise_application_error(-20000, 'Error exporting row ' || v_rows_exported || ' for column '
+							|| v_column_metadata(i).col_name || '. ' || 'Inserter Cannot export a NCLOB larger than 4000 bytes. ' ||
+							'For large data, you may want to consider another tool, such as Oracle Data Pump.');
+					end if;
+					v_columns(i) := get_string_from_nvarchar2(v_nvarchar2, p_escape_style);
 				end if;
 			-- Timestamp and SYSTIMESTAMP can be different. Note that DBMS_TYPES is not always accurate.
 			elsif v_column_metadata(i).col_type in (180, 181) then

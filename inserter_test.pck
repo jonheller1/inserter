@@ -90,6 +90,8 @@ begin
 	execute immediate 'drop table inserter_test_table_source purge';
 	execute immediate 'drop table inserter_test_table_target purge';
 	execute immediate 'drop table inserter_test_long';
+	execute immediate 'drop table inserter_test_clob';
+	execute immediate 'drop table inserter_test_nclob';
 exception when v_table_does_not_exist then null;
 end tear_down;
 
@@ -100,22 +102,23 @@ begin
 	'
 		create table inserter_test_table_source
 		(
-			a_number number,
-			a_varchar2 varchar2(4000),
-			a_date date,
+			a_number    number,
+			a_varchar2  varchar2(4000),
+			a_date      date,
 			a_timestamp timestamp,
-			a_rowid rowid,
-			a_char char(10),
-			a_nvarchar2 nvarchar2(2000)
+			a_rowid     rowid,
+			a_char      char(10),
+			a_nvarchar2 nvarchar2(2000),
+			a_nchar     nchar(10)
 		)
 	';
 
 	execute immediate
 	q'[
 		insert into inserter_test_table_source
-		select 1, 'asdf', date '2000-01-01', timestamp '2000-01-01 00:00:01', null, 'asdf', n'asdf'               from dual union all
+		select 1, 'asdf', date '2000-01-01', timestamp '2000-01-01 00:00:01', null, 'asdf', n'asdf'             , unistr('\D83D\DE00')  from dual union all
 		-- unistr('\D83D\DE00') is the "Grinning Face" emoji.
-		select 2, 'qwer', date '3000-01-01', timestamp '3000-01-01 00:00:01', null, 'qwer', unistr('\D83D\DE00')  from dual
+		select 2, 'qwer', date '3000-01-01', timestamp '3000-01-01 00:00:01', null, 'qwer', unistr('\D83D\DE00'), n'asdf'               from dual
 	]';
 
 	execute immediate
@@ -135,6 +138,24 @@ begin
 		(
 			id     number,
 			a_long long
+		)
+	';
+
+	execute immediate
+	'
+		create table inserter_test_clob
+		(
+			id     number,
+			a_clob clob
+		)
+	';
+
+	execute immediate
+	'
+		create table inserter_test_nclob
+		(
+			id      number,
+			a_nclob nclob
 		)
 	';
 
@@ -405,6 +426,155 @@ end test_long;
 
 
 --------------------------------------------------------------------------------
+-- This procedure is very similar to TEST_LONG.
+procedure test_clob is
+	v_test_name varchar2(100);
+	v_actual    clob;
+	v_expected  clob;
+	v_options   inserter.options_rec;
+begin
+	-- Set common options for simple tests. These will make the output as simple as possible.
+	v_options.p_target_table   := 'inserter_test_clob';
+	v_options.p_header_style   := inserter.header_style_off;
+	v_options.p_footer_style   := inserter.footer_style_off;
+	v_options.p_commit_style   := inserter.commit_style_none;
+	v_options.p_sql_terminator := null;
+	v_options.p_column_list    := inserter.column_list_none;
+
+	-- Test a few bytes of CLOB.
+	v_test_name := 'CLOB 1 - Small value';
+	execute immediate q'[ insert into inserter_test_clob values(1, 'asdf') ]';
+	v_options.p_source_select := q'[select * from inserter_test_clob]';
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected :=
+	q'[
+		insert into inserter_test_clob
+		select 1,'asdf' from dual
+	]';
+	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
+
+	-- Test the largest possible value (for this program anyway).
+	v_test_name := 'CLOB 2 - Large value';
+	execute immediate
+	q'[
+		declare
+			v_clob1 clob := lpad('A', 4000, 'A');
+		begin
+			insert into inserter_test_clob values(2, v_clob1);
+		end;
+	]';
+	v_options.p_source_select := q'[select * from inserter_test_clob where id = 2]';
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected := replace(
+	q'[
+		insert into inserter_test_clob
+		select 2,'#4KA#' from dual
+	]', '#4KA#', lpad('A', 4000, 'A'));
+	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
+
+	-- Test a value that is too large to meaningfully export.
+	v_test_name := 'CLOB 3 - Large value';
+	execute immediate
+	q'[
+		declare
+			-- Note that you CAN simply concatenate to make a CLOB.
+			-- But to keep this test style consistent with LONG code, the concatenation is done the same way.
+			v_clob1 clob := lpad('A', 4000, 'A');
+			v_clob2 clob := 'A';
+			v_clob3 clob := v_clob1 || v_clob2;
+		begin
+			insert into inserter_test_clob values(3, v_clob3);
+		end;
+	]';
+	v_options.p_source_select := q'[select * from inserter_test_clob where id = 3]';
+	begin
+		select inserter.get_script(v_options) into v_actual from dual;
+		assert_equals(v_test_name, 'An exception', 'No exception');
+	exception when others then
+		assert_like(v_test_name, 'ORA-20000: Error exporting row 1 for column A_CLOB. '||
+			'Inserter Cannot export a CLOB larger than 4000 bytes. '||
+			'For large data, you may want to consider another tool, such as Oracle Data Pump.%',
+			sqlerrm);
+	end;
+
+end test_clob;
+
+
+--------------------------------------------------------------------------------
+-- This procedure is very similar to TEST_LONG.
+procedure test_nclob is
+	v_test_name varchar2(100);
+	v_actual    clob;
+	v_expected  clob;
+	v_options   inserter.options_rec;
+begin
+	-- Set common options for simple tests. These will make the output as simple as possible.
+	v_options.p_target_table   := 'inserter_test_nclob';
+	v_options.p_header_style   := inserter.header_style_off;
+	v_options.p_footer_style   := inserter.footer_style_off;
+	v_options.p_commit_style   := inserter.commit_style_none;
+	v_options.p_sql_terminator := null;
+	v_options.p_column_list    := inserter.column_list_none;
+
+	-- Test a few bytes of NCLOB.
+	v_test_name := 'NCLOB 1 - Small value';
+	execute immediate q'[ insert into inserter_test_nclob values(1, 'asdf') ]';
+	v_options.p_source_select := q'[select * from inserter_test_nclob]';
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected :=
+	q'[
+		insert into inserter_test_nclob
+		select 1,n'asdf' from dual
+	]';
+	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
+
+	-- Test the largest possible value (for this program anyway). (2000 characters = 40000 bytes).
+	v_test_name := 'NCLOB 2 - Large value';
+	execute immediate
+	q'[
+		declare
+			v_nclob1 nclob := lpad('A', 2000, 'A');
+		begin
+			insert into inserter_test_nclob values(2, v_nclob1);
+		end;
+	]';
+	v_options.p_source_select := q'[select * from inserter_test_nclob where id = 2]';
+	select inserter.get_script(v_options) into v_actual from dual;
+	v_expected := replace(
+	q'[
+		insert into inserter_test_nclob
+		select 2,n'#2KA#' from dual
+	]', '#2KA#', lpad('A', 2000, 'A'));
+	assert_equals(v_test_name, trim_expected_results(v_expected), v_actual);
+
+	-- Test a value that is too large to meaningfully export.
+	v_test_name := 'NCLOB 3 - Large value';
+	execute immediate
+	q'[
+		declare
+			-- Note that you cannot simply concatenate varchar2s to make the nclob.
+			v_nclob1 nclob := lpad('A', 2000, 'A');
+			v_nclob2 nclob := 'A';
+			v_nclob3 nclob := v_nclob1 || v_nclob2;
+		begin
+			insert into inserter_test_nclob values(3, v_nclob3);
+		end;
+	]';
+	v_options.p_source_select := q'[select * from inserter_test_nclob where id = 3]';
+	begin
+		select inserter.get_script(v_options) into v_actual from dual;
+		assert_equals(v_test_name, 'An exception', 'No exception');
+	exception when others then
+		assert_like(v_test_name, 'ORA-20000: Error exporting row 1 for column A_NCLOB. '||
+			'Inserter Cannot export a NCLOB larger than 4000 bytes. '||
+			'For large data, you may want to consider another tool, such as Oracle Data Pump.%',
+			sqlerrm);
+	end;
+
+end test_nclob;
+
+
+--------------------------------------------------------------------------------
 procedure test_unsupported_types is
 	v_unused_result clob;
 	v_error_message clob;
@@ -468,6 +638,8 @@ begin
 	test_date_style;
 	test_table_minus;
 	test_long;
+	test_clob;
+	test_nclob;
 	test_unsupported_types;
 
 	--Clean up the tests.
